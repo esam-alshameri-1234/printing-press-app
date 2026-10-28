@@ -214,7 +214,6 @@ elif menu == "📦 إدارة المخزون والأصناف والتقارير
             sel_rep = st.selectbox("اختر الصنف لعرض حركته", options=df_items['كود الصنف'].tolist(), format_func=lambda x: df_items.loc[df_items['كود الصنف'] == x, 'اسم الصنف'].values[0])
             
             st.markdown("#### الوارد (مشتريات)")
-                        st.markdown("#### الوارد (مشتريات)")
             try:
                 df_p = pd.read_sql(f"SELECT invoice_no AS 'رقم الفاتورة', quantity AS 'الكمية الواردة', unit_price AS 'السعر' FROM purchase_items WHERE item_code = '{sel_rep}'", conn)
                 st.dataframe(df_p, use_container_width=True)
@@ -227,12 +226,6 @@ elif menu == "📦 إدارة المخزون والأصناف والتقارير
                 st.dataframe(df_s, use_container_width=True)
             except Exception:
                 st.info("لا توجد حركات مبيعات مسجلة لهذا الصنف بعد.")
-                
-            st.dataframe(df_p, use_container_width=True)
-            
-            st.markdown("#### المنصرف (مبيعات)")
-            df_s = pd.read_sql(f"SELECT invoice_no AS 'رقم الفاتورة', customer_name AS 'العميل', quantity AS 'الكمية المباعة', unit_price AS 'السعر', sale_date AS 'التاريخ' FROM sales_invoices si JOIN sales_items sit ON si.invoice_no = sit.invoice_no WHERE sit.item_code = '{sel_rep}'", conn)
-            st.dataframe(df_s, use_container_width=True)
 
     with tab2:
         with st.form("add_item_form"):
@@ -269,6 +262,7 @@ elif menu == "📦 إدارة المخزون والأصناف والتقارير
             df_inv_full.to_excel(writer, sheet_name='تقرير المخزون', index=False)
         output.seek(0)
         st.download_button("📥 تنزيل تقرير المخزون إكسل (.xlsx)", data=output, file_name="Inventory_Report.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            
 
 # ================= 3. PRODUCTION RECIPES & MATERIAL CONSUMPTION =================
 elif menu == "🧪 وصفات التصنيع وصرف المواد":
