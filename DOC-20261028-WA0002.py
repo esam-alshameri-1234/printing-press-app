@@ -5,7 +5,7 @@ from datetime import datetime
 import io
 
 st.set_page_config(
-    page_title="نظام المطبعة الشامل والذكي (ERP)",
+    page_title="نظام المطبعة الشامل والذكي (ERP - ر.ي)",
     page_icon="🖨️",
     layout="wide"
 )
@@ -21,7 +21,7 @@ def init_db():
     conn = get_connection()
     cursor = conn.cursor()
     
-    # 1. Users Table with granular permissions
+    # 1. Users Table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,7 +61,7 @@ def init_db():
         )
     ''')
     
-    # 4. Purchases Header & Details
+    # 4. Purchases
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS purchase_invoices (
             inv_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,7 +85,7 @@ def init_db():
         )
     ''')
     
-    # 5. Sales Header & Details
+    # 5. Sales
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS sales_invoices (
             s_inv_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -111,7 +111,7 @@ def init_db():
         )
     ''')
     
-    # 6. Worker Tasks & Wages (Updated to support stage, item and admin piece rate)
+    # 6. Worker Tasks & Wages
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS worker_tasks (
             task_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -126,6 +126,17 @@ def init_db():
             task_date TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(order_id) REFERENCES orders(order_id),
             FOREIGN KEY(item_code) REFERENCES items(item_code)
+        )
+    ''')
+    
+    # 7. Worker Advances / Payments (سلف ومستحقات مصروفة للموظفين)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS worker_advances (
+            advance_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            worker_username TEXT NOT NULL,
+            amount REAL NOT NULL,
+            notes TEXT,
+            advance_date TEXT DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     
@@ -178,7 +189,7 @@ if not st.session_state["logged_in"]:
         st.info("💡 **حساب الأدمن الافتراضي:** `admin` / كلمة المرور: `1234`")
     st.stop()
 
-# --- SIDEBAR MENU & PERMISSIONS CHECK ---
+# --- SIDEBAR MENU ---
 role = st.session_state["role"]
 full_name = st.session_state["full_name"]
 allowed = st.session_state["allowed_screens"]
@@ -195,11 +206,11 @@ all_menu_options = {
     "📋 إدارة الطلبيات والإنتاج": "Orders",
     "⚙️ متابعة سير العمل ومراحل الإنتاج": "Workflow",
     "👥 تسجيل وأجور العاملين": "Workers",
+    "📑 كشوفات حساب الموظفين": "Employee_Statement",
     "🔐 إعدادات الحساب وكلمة المرور": "Password",
     "🛠️ إدارة المستخدمين والصلاحيات": "Admin_Users"
 }
 
-# Filter menus based on user permissions
 available_menus = []
 for title, key in all_menu_options.items():
     if role == "Admin" or allowed == "All" or key in allowed.split(","):
@@ -226,8 +237,8 @@ if menu == "📊 لوحة المؤشرات والتحكم":
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("إجمالي الطلبيات", total_orders)
     col2.metric("عدد الأصناف بالمستودع", total_items)
-    col3.metric("إجمالي المبيعات", f"{total_sales:,.2f} ر.س")
-    col4.metric("إجمالي أجور العمال", f"{total_wages:,.2f} ر.س")
+    col3.metric("إجمالي المبيعات", f"{total_sales:,.2f} ر.ي")
+    col4.metric("إجمالي أجور العمال", f"{total_wages:,.2f} ر.ي")
     
     st.markdown("### 🚀 حالة سير العمل ومراحل الطلبيات")
     df_o = pd.read_sql("SELECT order_id AS 'رقم الطلبية', customer_name AS 'العميل', ordered_quantity AS 'الكمية', current_stage AS 'المرحلة الحالية', order_status AS 'الحالة' FROM orders", conn)
@@ -241,7 +252,7 @@ elif menu == "📦 إدارة المخزون والأصناف":
     tab1, tab2, tab3 = st.tabs(["قائمة الأصناف الحالية", "إضافة صنف جديد", "تعديل أو حذف صنف"])
     
     with tab1:
-        df_items = pd.read_sql("SELECT item_code AS 'كود الصنف', item_name AS 'اسم الصنف', category AS 'التصنيف', unit AS 'الوحدة', current_stock AS 'الرصيد الحالي', unit_price AS 'السعر' FROM items", conn)
+        df_items = pd.read_sql("SELECT item_code AS 'كود الصنف', item_name AS 'اسم الصنف', category AS 'التصنيف', unit AS 'الوحدة', current_stock AS 'الرصيد الحالي', unit_price AS 'السعر (ر.ي)' FROM items", conn)
         st.dataframe(df_items, use_container_width=True)
         
     with tab2:
@@ -254,7 +265,7 @@ elif menu == "📦 إدارة المخزون والأصناف":
             with c2:
                 unit = st.text_input("الوحدة (رزمة، قطعة، لتر)")
                 stock = st.number_input("الرصيد الابتدائي", min_value=0.0, value=0.0)
-                price = st.number_input("سعر الوحدة", min_value=0.0, value=0.0)
+                price = st.number_input("سعر الوحدة (ر.ي)", min_value=0.0, value=0.0)
             
             if st.form_submit_button("حفظ الصنف الجديد"):
                 try:
@@ -296,7 +307,7 @@ elif menu == "📦 إدارة المخزون والأصناف":
                     st.success("تم حذف الصنف بنجاح!")
                     st.rerun()
 
-# ================= 3. MULTI-ITEM PURCHASE INVOICES =================
+# ================= 3. MULTI-ITEM PURCHASES =================
 elif menu == "📥 فواتير الشراء متعددة الأصناف":
     st.title("📥 فواتير الشراء متعددة الأصناف (توريد مواد خام)")
     st.markdown("---")
@@ -314,11 +325,11 @@ elif menu == "📥 فواتير الشراء متعددة الأصناف":
         else:
             i1 = st.selectbox("المادة الخام 1", options=raw_items['item_code'].tolist(), format_func=lambda x: raw_items[raw_items['item_code'] == x]['item_name'].values[0], key="i1")
             q1 = st.number_input("الكمية 1", min_value=0.0, value=0.0, key="q1")
-            pr1 = st.number_input("سعر الوحدة 1", min_value=0.0, value=0.0, key="pr1")
+            pr1 = st.number_input("سعر الوحدة 1 (ر.ي)", min_value=0.0, value=0.0, key="pr1")
             
             i2 = st.selectbox("المادة الخام 2 (اختياري)", options=["لا يوجد"] + raw_items['item_code'].tolist(), format_func=lambda x: "لا يوجد" if x=="لا يوجد" else raw_items[raw_items['item_code'] == x]['item_name'].values[0], key="i2")
             q2 = st.number_input("الكمية 2", min_value=0.0, value=0.0, key="q2")
-            pr2 = st.number_input("سعر الوحدة 2", min_value=0.0, value=0.0, key="pr2")
+            pr2 = st.number_input("سعر الوحدة 2 (ر.ي)", min_value=0.0, value=0.0, key="pr2")
             
             if st.form_submit_button("حفظ فاتورة الشراء وتحديث المخزن"):
                 if p_inv_no and p_supplier:
@@ -353,10 +364,10 @@ elif menu == "📥 فواتير الشراء متعددة الأصناف":
                     st.warning("يرجى إدخال رقم الفاتورة واسم المورد.")
 
     st.markdown("### سجل فواتير الشراء السابقة")
-    df_p_inv = pd.read_sql("SELECT invoice_no AS 'رقم الفاتورة', supplier_name AS 'المورد', total_invoice_amount AS 'إجمالي الفاتورة', purchase_date AS 'التاريخ' FROM purchase_invoices", conn)
+    df_p_inv = pd.read_sql("SELECT invoice_no AS 'رقم الفاتورة', supplier_name AS 'المورد', total_invoice_amount AS 'إجمالي الفاتورة (ر.ي)', purchase_date AS 'التاريخ' FROM purchase_invoices", conn)
     st.dataframe(df_p_inv, use_container_width=True)
 
-# ================= 4. MULTI-ITEM SALES INVOICES (CORRECTED) =================
+# ================= 4. MULTI-ITEM SALES =================
 elif menu == "💰 فواتير البيع متعددة الأصناف":
     st.title("💰 فواتير البيع متعددة الأصناف والمخرجات")
     st.markdown("---")
@@ -382,11 +393,11 @@ elif menu == "💰 فواتير البيع متعددة الأصناف":
         else:
             s_i1 = st.selectbox("الصنف المباع 1", options=all_itms['item_code'].tolist(), format_func=lambda x: all_itms[all_itms['item_code'] == x]['item_name'].values[0], key="si1")
             s_q1 = st.number_input("الكمية المباعة 1", min_value=0.0, value=0.0, key="sq1")
-            s_pr1 = st.number_input("سعر البيع للوحدة 1", min_value=0.0, value=0.0, key="spr1")
+            s_pr1 = st.number_input("سعر البيع للوحدة 1 (ر.ي)", min_value=0.0, value=0.0, key="spr1")
             
             s_i2 = st.selectbox("الصنف المباع 2 (اختياري)", options=["لا يوجد"] + all_itms['item_code'].tolist(), format_func=lambda x: "لا يوجد" if x=="لا يوجد" else all_itms[all_itms['item_code'] == x]['item_name'].values[0], key="si2")
             s_q2 = st.number_input("الكمية المباعة 2", min_value=0.0, value=0.0, key="sq2")
-            s_pr2 = st.number_input("سعر البيع للوحدة 2", min_value=0.0, value=0.0, key="spr2")
+            s_pr2 = st.number_input("سعر البيع للوحدة 2 (ر.ي)", min_value=0.0, value=0.0, key="spr2")
             
             if st.form_submit_button("إصدار فاتورة البيع وإغلاق الطلبية"):
                 if s_ord and s_inv_no:
@@ -420,9 +431,8 @@ elif menu == "💰 فواتير البيع متعددة الأصناف":
                         st.error(f"خطأ: رقم الفاتورة موجود مسبقاً ({e})")
                 else:
                     st.warning("يرجى اختيار الطلبية وإدخال رقم الفاتورة.")
-
-    st.markdown("### سجل فواتير المبيعات الصادرة")
-    df_s_inv = pd.read_sql("SELECT invoice_no AS 'رقم الفاتورة', order_id AS 'رقم الطلبية', customer_name AS 'العميل', total_invoice_amount AS 'إجمالي الفاتورة', sale_date AS 'التاريخ' FROM sales_invoices", conn)
+                    st.markdown("### سجل فواتير المبيعات الصادرة")
+    df_s_inv = pd.read_sql("SELECT invoice_no AS 'رقم الفاتورة', order_id AS 'رقم الطلبية', customer_name AS 'العميل', total_invoice_amount AS 'إجمالي الفاتورة (ر.ي)', sale_date AS 'التاريخ' FROM sales_invoices", conn)
     st.dataframe(df_s_inv, use_container_width=True)
 
 # ================= 5. ORDERS =================
@@ -471,13 +481,14 @@ elif menu == "⚙️ متابعة سير العمل ومراحل الإنتاج"
     st.markdown("### جدول سير العمل الحالي")
     df_flow = pd.read_sql("SELECT order_id AS 'رقم الطلبية', customer_name AS 'العميل', current_stage AS 'المرحلة', order_status AS 'الحالة' FROM orders", conn)
     st.dataframe(df_flow, use_container_width=True)
-# ================= 7. WORKERS WAGES & TASKS (Stage, Item, Admin Rate) =================
+
+# ================= 7. WORKERS WAGES =================
 elif menu == "👥 تسجيل وأجور العاملين":
     st.title("👥 تسجيل أعمال العمال ومتابعة الأجور")
     st.markdown("---")
     
     with st.form("worker_task"):
-        st.subheader("تسجيل إنجاز مهمة (للعامل أو الأدمن)")
+        st.subheader("تسجيل إنجاز مهمة")
         ords_act = pd.read_sql("SELECT order_id, customer_name FROM orders WHERE order_status = 'قيد التنفيذ'", conn)
         o_sel = st.selectbox("رقم الطلبية المرتبطة", options=ords_act['order_id'].tolist(), format_func=lambda x: f"طلبية #{x} - {ords_act.loc[ords_act['order_id'] == x, 'customer_name'].values[0]}") if not ords_act.empty else None
         
@@ -489,9 +500,8 @@ elif menu == "👥 تسجيل وأجور العاملين":
         t_desc = st.text_input("وصف نوع العمل (مثال: طباعة أوفست / فرز يدوي)")
         q_done = st.number_input("الكمية المنجزة", min_value=1.0, value=100.0)
         
-        # Admin can set price rate, workers see 0 or read-only
         if role == "Admin":
-            p_rate = st.number_input("أجر القطعة (يحدده الأدمن)", min_value=0.0, value=0.5)
+            p_rate = st.number_input("أجر القطعة (ر.ي) - يحدده الأدمن", min_value=0.0, value=0.5)
         else:
             p_rate = 0.0
             st.info("💡 يتم تحديد أجر القطعة من قبل إدارة النظام (الأدمن).")
@@ -508,22 +518,21 @@ elif menu == "👥 تسجيل وأجور العاملين":
     st.markdown("### سجل المهام والأجور")
     if role == "Admin":
         df_tasks = pd.read_sql("""
-            SELECT t.task_id AS 'معرف', t.worker_username AS 'العامل', t.order_id AS 'الطلبية', t.stage_name AS 'المرحلة', i.item_name AS 'الصنف', t.task_description AS 'نوع العمل', t.quantity_done AS 'الكمية', t.piece_rate AS 'الأجر', t.total_wage AS 'الإجمالي', t.task_date AS 'التاريخ'
+            SELECT t.task_id AS 'معرف', t.worker_username AS 'العامل', t.order_id AS 'الطلبية', t.stage_name AS 'المرحلة', i.item_name AS 'الصنف', t.task_description AS 'نوع العمل', t.quantity_done AS 'الكمية', t.piece_rate AS 'الأجر (ر.ي)', t.total_wage AS 'الإجمالي (ر.ي)', t.task_date AS 'التاريخ'
             FROM worker_tasks t JOIN items i ON t.item_code = i.item_code
         """, conn)
     else:
         df_tasks = pd.read_sql(f"""
-            SELECT t.task_id AS 'معرف', t.order_id AS 'الطلبية', t.stage_name AS 'المرحلة', i.item_name AS 'الصنف', t.task_description AS 'نوع العمل', t.quantity_done AS 'الكمية', t.total_wage AS 'إجمالي أجري', t.task_date AS 'التاريخ'
+            SELECT t.task_id AS 'معرف', t.order_id AS 'الطلبية', t.stage_name AS 'المرحلة', i.item_name AS 'الصنف', t.task_description AS 'نوع العمل', t.quantity_done AS 'الكمية', t.total_wage AS 'إجمالي أجري (ر.ي)', t.task_date AS 'التاريخ'
             FROM worker_tasks t JOIN items i ON t.item_code = i.item_code WHERE t.worker_username = '{st.session_state['username']}'
         """, conn)
     st.dataframe(df_tasks, use_container_width=True)
     
-    # Admin Edit Task Rate or Delete
     if role == "Admin" and not df_tasks.empty:
         st.markdown("#### 🛠️ تعديل أجر القطعة أو حذف مهمة (صلاحية الأدمن)")
         with st.form("admin_edit_task"):
             t_id = st.number_input("معرف المهمة (Task ID) للتعديل", min_value=1, step=1)
-            new_rate = st.number_input("تعديل أجر القطعة الجديد", value=0.5)
+            new_rate = st.number_input("تعديل أجر القطعة الجديد (ر.ي)", value=0.5)
             
             col_t1, col_t2 = st.columns(2)
             with col_t1:
@@ -544,7 +553,63 @@ elif menu == "👥 تسجيل وأجور العاملين":
                 st.success("تم حذف المهمة بنجاح!")
                 st.rerun()
 
-# ================= 8. PASSWORD CHANGE =================
+# ================= 8. EMPLOYEE STATEMENT (كشوفات حساب الموظفين) =================
+elif menu == "📑 كشوفات حساب الموظفين":
+    st.title("📑 كشوفات حساب وتفاصيل مستحقات الموظفين")
+    st.markdown("---")
+    
+    # Allow Admin to select any worker, or worker to see their own
+    if role == "Admin":
+        workers_list = pd.read_sql("SELECT username, full_name FROM users WHERE role = 'Worker'", conn)
+        if workers_list.empty:
+            st.info("لا توجد حسابات عمال مسجلة.")
+            sel_worker = None
+        else:
+            sel_worker = st.selectbox("اختر الموظف / العامل لعرض كشف حسابه", options=workers_list['username'].tolist(), format_func=lambda x: workers_list.loc[workers_list['username'] == x, 'full_name'].values[0])
+    else:
+        sel_worker = st.session_state["username"]
+        st.markdown(f"**كشف حساب العامل:** {full_name}")
+        
+    if sel_worker:
+        # 1. Calculate total earned wages
+        wages_df = pd.read_sql(f"SELECT SUM(total_wage) FROM worker_tasks WHERE worker_username = '{sel_worker}'", conn)
+        total_earned = wages_df.iloc[0, 0] or 0.0
+        
+        # 2. Calculate total advances/payments received
+        adv_df = pd.read_sql(f"SELECT SUM(amount) FROM worker_advances WHERE worker_username = '{sel_worker}'", conn)
+        total_advances = adv_df.iloc[0, 0] or 0.0
+        
+        net_due = total_earned - total_advances
+        
+        col_s1, col_s2, col_s3 = st.columns(3)
+        col_s1.metric("إجمالي المستحقات (الأجور)", f"{total_earned:,.2f} ر.ي")
+        col_s2.metric("إجمالي المستلم (سلف / دفعات)", f"{total_advances:,.2f} ر.ي")
+        col_s3.metric("الصافي المستحق للدفع", f"{net_due:,.2f} ر.ي")
+        
+        st.markdown("---")
+        st.markdown("### 📋 تفاصيل المهام والأجور المحسوبة")
+        df_w_tasks = pd.read_sql(f"SELECT task_id AS 'معرف', order_id AS 'الطلبية', stage_name AS 'المرحلة', task_description AS 'نوع العمل', quantity_done AS 'الكمية', piece_rate AS 'أجر القطعة', total_wage AS 'الأجر (ر.ي)', task_date AS 'التاريخ' FROM worker_tasks WHERE worker_username = '{sel_worker}'", conn)
+        st.dataframe(df_w_tasks, use_container_width=True)
+        
+        st.markdown("### 💸 سجل السلف والمبالغ المستلمة")
+        df_adv = pd.read_sql(f"SELECT advance_id AS 'معرف السند', amount AS 'المبلغ (ر.ي)', notes AS 'الملاحظات والسبب', advance_date AS 'التاريخ' FROM worker_advances WHERE worker_username = '{sel_worker}'", conn)
+        st.dataframe(df_adv, use_container_width=True)
+        
+        # Admin can add advance or payment
+        if role == "Admin":
+            st.markdown("#### ➕ تسجيل سفة نقدية أو دفعة مستلمة للموظف")
+            with st.form("add_advance_form"):
+                adv_amt = st.number_input("المبلغ المنصرف (ر.ي)", min_value=1.0, value=5000.0)
+                adv_notes = st.text_input("ملاحظات (مثل: سلفة عيدية، دفعة تحت الحساب)")
+                
+                if st.form_submit_button("تسجيل الصرف وخصمه من الرصيد"):
+                    cursor = conn.cursor()
+                    cursor.execute("INSERT INTO worker_advances (worker_username, amount, notes) VALUES (?, ?, ?)", (sel_worker, adv_amt, adv_notes))
+                    conn.commit()
+                    st.success("تم تسجيل السلفة بنجاح وتحديث كشف الحساب!")
+                    st.rerun()
+
+# ================= 9. PASSWORD CHANGE =================
 elif menu == "🔐 إعدادات الحساب وكلمة المرور":
     st.title("🔐 تغيير كلمة المرور الخاصة بحسابك")
     st.markdown("---")
@@ -572,7 +637,7 @@ elif menu == "🔐 إعدادات الحساب وكلمة المرور":
                 st.error("كلمة المرور الحالية غير صحيحة.")
             conn_u.close()
 
-# ================= 9. ADMIN USERS & PERMISSIONS & EXCEL EXPORT =================
+# ================= 10. ADMIN USERS & EXCEL EXPORT =================
 elif menu == "🛠️ إدارة المستخدمين والصلاحيات":
     if role != "Admin":
         st.error("عذراً، هذه الصفحة مخصصة لمدير النظام (Admin) فقط.")
@@ -593,7 +658,7 @@ elif menu == "🛠️ إدارة المستخدمين والصلاحيات":
                 if st.form_submit_button("إضافة المستخدم"):
                     try:
                         cursor = conn.cursor()
-                        cursor.execute("INSERT INTO users (username, password, full_name, department, role, allowed_screens) VALUES (?, ?, ?, ?, ?, 'Dashboard,Inventory,Orders,Workers')", (u_name, u_pass, u_full, u_dept, u_role))
+                        cursor.execute("INSERT INTO users (username, password, full_name, department, role, allowed_screens) VALUES (?, ?, ?, ?, ?, 'Dashboard,Inventory,Orders,Workers,Employee_Statement')", (u_name, u_pass, u_full, u_dept, u_role))
                         conn.commit()
                         st.success("تم إضافة المستخدم بنجاح!")
                         st.rerun()
@@ -611,7 +676,6 @@ elif menu == "🛠️ إدارة المستخدمين والصلاحيات":
                 with st.form("perm_form"):
                     st.markdown(f"**الصلاحيات الحالية لـ ({sel_usr}):** `{current_allowed}`")
                     
-                    # Checkboxes for screens
                     p_dash = st.checkbox("لوحة المؤشرات (Dashboard)", value="Dashboard" in current_allowed or current_allowed=="All")
                     p_inv = st.checkbox("إدارة المخزون (Inventory)", value="Inventory" in current_allowed or current_allowed=="All")
                     p_pur = st.checkbox("فواتير الشراء (Purchases)", value="Purchases" in current_allowed or current_allowed=="All")
@@ -619,6 +683,7 @@ elif menu == "🛠️ إدارة المستخدمين والصلاحيات":
                     p_ord = st.checkbox("الطلبيات والإنتاج (Orders)", value="Orders" in current_allowed or current_allowed=="All")
                     p_wf = st.checkbox("متابعة سير العمل (Workflow)", value="Workflow" in current_allowed or current_allowed=="All")
                     p_wrk = st.checkbox("تسجيل وأجور العمال (Workers)", value="Workers" in current_allowed or current_allowed=="All")
+                    p_stmt = st.checkbox("كشوفات الحساب (Employee_Statement)", value="Employee_Statement" in current_allowed or current_allowed=="All")
                     
                     if st.form_submit_button("حفظ وتحديث الصلاحيات"):
                         new_perms = []
@@ -629,6 +694,7 @@ elif menu == "🛠️ إدارة المستخدمين والصلاحيات":
                         if p_ord: new_perms.append("Orders")
                         if p_wf: new_perms.append("Workflow")
                         if p_wrk: new_perms.append("Workers")
+                        if p_stmt: new_perms.append("Employee_Statement")
                         
                         perm_str = ",".join(new_perms)
                         cursor = conn.cursor()
@@ -647,7 +713,8 @@ elif menu == "🛠️ إدارة المستخدمين والصلاحيات":
                     pd.read_sql("SELECT * FROM orders", conn).to_excel(writer, sheet_name='الطلبيات', index=False)
                     pd.read_sql("SELECT * FROM purchase_invoices", conn).to_excel(writer, sheet_name='فواتير الشراء', index=False)
                     pd.read_sql("SELECT * FROM sales_invoices", conn).to_excel(writer, sheet_name='فواتير البيع', index=False)
-                    pd.read_sql("SELECT * FROM worker_tasks", conn).to_excel(writer, sheet_name='أعمال وأجور العمال', index=False)
+                    pd.read_sql("SELECT * FROM worker_tasks", conn).to_excel(writer, sheet_name='أعمال العمال', index=False)
+                    pd.read_sql("SELECT * FROM worker_advances", conn).to_excel(writer, sheet_name='سلف ومستحقات العمال', index=False)
                 output.seek(0)
                 
                 st.download_button(
