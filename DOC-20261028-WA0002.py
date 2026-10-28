@@ -45,7 +45,7 @@ def init_db():
     cursor.execute(''' CREATE TABLE IF NOT EXISTS sales_items ( s_item_id INTEGER PRIMARY KEY AUTOINCREMENT, invoice_no TEXT NOT NULL, item_code TEXT NOT NULL, quantity REAL NOT NULL, unit_price REAL NOT NULL, total_price REAL NOT NULL, FOREIGN KEY(invoice_no) REFERENCES sales_invoices(invoice_no), FOREIGN KEY(item_code) REFERENCES items(item_code) ) ''')
     
     # 8. Accounting Module (الدليل المحاسبي والقيود المزدوجة وسندات القبض والصرف)
-    cursor.execute(''' CREATE TABLE IF NOT EXISTS chart_of_accounts ( account_code TEXT PRIMARY KEY, account_name TEXT NOT NULL, account_type TEXT NOT NULL -- أصول, خصوم, إيرادات, مصروفات, حقوق ملكية ) ''')
+    cursor.execute(''' CREATE TABLE IF NOT EXISTS chart_of_accounts ( account_code TEXT PRIMARY KEY, account_name TEXT NOT NULL, account_type TEXT NOT NULL) ''')
     
     cursor.execute(''' CREATE TABLE IF NOT EXISTS journal_entries ( entry_id INTEGER PRIMARY KEY AUTOINCREMENT, entry_date TEXT DEFAULT CURRENT_TIMESTAMP, reference_no TEXT, description TEXT NOT NULL, account_code TEXT NOT NULL, debit REAL DEFAULT 0, credit REAL DEFAULT 0, FOREIGN KEY(account_code) REFERENCES chart_of_accounts(account_code) ) ''')
     
