@@ -214,7 +214,20 @@ elif menu == "📦 إدارة المخزون والأصناف والتقارير
             sel_rep = st.selectbox("اختر الصنف لعرض حركته", options=df_items['كود الصنف'].tolist(), format_func=lambda x: df_items.loc[df_items['كود الصنف'] == x, 'اسم الصنف'].values[0])
             
             st.markdown("#### الوارد (مشتريات)")
-            df_p = pd.read_sql(f"SELECT invoice_no AS 'رقم الفاتورة', supplier_name AS 'المورد', quantity AS 'الكمية الواردة', unit_price AS 'السعر', purchase_date AS 'التاريخ' FROM purchase_invoices pi JOIN purchase_items pit ON pi.invoice_no = pit.invoice_no WHERE pit.item_code = '{sel_rep}'", conn)
+                        st.markdown("#### الوارد (مشتريات)")
+            try:
+                df_p = pd.read_sql(f"SELECT invoice_no AS 'رقم الفاتورة', quantity AS 'الكمية الواردة', unit_price AS 'السعر' FROM purchase_items WHERE item_code = '{sel_rep}'", conn)
+                st.dataframe(df_p, use_container_width=True)
+            except Exception:
+                st.info("لا توجد حركات شراء مسجلة لهذا الصنف بعد.")
+            
+            st.markdown("#### المنصرف (مبيعات)")
+            try:
+                df_s = pd.read_sql(f"SELECT invoice_no AS 'رقم الفاتورة', quantity AS 'الكمية المباعة', unit_price AS 'السعر' FROM sales_items WHERE item_code = '{sel_rep}'", conn)
+                st.dataframe(df_s, use_container_width=True)
+            except Exception:
+                st.info("لا توجد حركات مبيعات مسجلة لهذا الصنف بعد.")
+                
             st.dataframe(df_p, use_container_width=True)
             
             st.markdown("#### المنصرف (مبيعات)")
