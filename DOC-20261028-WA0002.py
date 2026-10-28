@@ -49,7 +49,18 @@ def init_db():
     
     cursor.execute(''' CREATE TABLE IF NOT EXISTS journal_entries ( entry_id INTEGER PRIMARY KEY AUTOINCREMENT, entry_date TEXT DEFAULT CURRENT_TIMESTAMP, reference_no TEXT, description TEXT NOT NULL, account_code TEXT NOT NULL, debit REAL DEFAULT 0, credit REAL DEFAULT 0, FOREIGN KEY(account_code) REFERENCES chart_of_accounts(account_code) ) ''')
     
-    cursor.execute(''' CREATE TABLE IF NOT EXISTS vouchers ( voucher_id INTEGER PRIMARY KEY AUTOINCREMENT, voucher_type TEXT NOT NULL, -- سند قبض, سند صرف voucher_date TEXT DEFAULT CURRENT_TIMESTAMP, beneficiary TEXT NOT NULL, amount REAL NOT NULL, account_code TEXT NOT NULL, description TEXT, FOREIGN KEY(account_code) REFERENCES chart_of_accounts(account_code) ) ''')
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS vouchers (
+        voucher_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        voucher_type TEXT NOT NULL,
+        voucher_date TEXT DEFAULT CURRENT_TIMESTAMP,
+        beneficiary TEXT NOT NULL,
+        amount REAL NOT NULL,
+        account_code TEXT NOT NULL,
+        description TEXT,
+        FOREIGN KEY(account_code) REFERENCES chart_of_accounts(account_code)
+    )
+''')
     
     # Seed default accounts if empty
     cursor.execute("SELECT COUNT(*) FROM chart_of_accounts")
