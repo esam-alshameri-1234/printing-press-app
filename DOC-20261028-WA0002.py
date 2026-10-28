@@ -60,7 +60,7 @@ def init_db():
         )
     ''')
     
-    # 4. Purchases Invoices (فواتير الشراء)
+    # 4. Purchases Invoices
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS purchases (
             purchase_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,7 +75,7 @@ def init_db():
         )
     ''')
     
-    # 5. Sales Invoices (فواتير البيع)
+    # 5. Sales Invoices
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS sales (
             sale_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,11 +88,11 @@ def init_db():
         )
     ''')
     
-    # 6. Inventory Vouchers (سندات الصرف والقبض المخزني)
+    # 6. Inventory Vouchers
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS inventory_vouchers (
             voucher_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            voucher_type TEXT NOT NULL, -- سند صرف, سند قبض
+            voucher_type TEXT NOT NULL,
             item_code TEXT,
             quantity REAL NOT NULL,
             notes TEXT,
@@ -116,7 +116,6 @@ def init_db():
         )
     ''')
     
-    # Seed default admin if empty
     cursor.execute("SELECT COUNT(*) FROM users")
     if cursor.fetchone()[0] == 0:
         cursor.execute("INSERT INTO users (username, password, full_name, department, role, allowed_screens) VALUES ('admin', '1234', 'مدير النظام العام', 'الإدارة العليا', 'Admin', 'All')")
@@ -217,7 +216,7 @@ if menu == "📊 لوحة المؤشرات والتحكم":
     df_o = pd.read_sql("SELECT order_id AS 'رقم الطلبية', customer_name AS 'العميل', ordered_quantity AS 'الكمية', current_stage AS 'المرحلة الحالية', order_status AS 'الحالة' FROM orders", conn)
     st.dataframe(df_o, use_container_width=True)
 
-# ================= 2. INVENTORY & ITEMS (Add, Edit, Delete) =================
+# ================= 2. INVENTORY & ITEMS =================
 elif menu == "📦 إدارة المخزون والأصناف":
     st.title("📦 إدارة الأصناف والمخزون (إضافة، تعديل، حذف)")
     st.markdown("---")
@@ -286,7 +285,7 @@ elif menu == "📦 إدارة المخزون والأصناف":
         else:
             st.warning("هذه الصلاحية خاصة بمدير النظام.")
 
-# ================= 3. PURCHASES & INVENTORY VOUCHERS =================
+# ================= 3. PURCHASES & VOUCHERS =================
 elif menu == "📥 فواتير وسندات المخزن":
     st.title("📥 فواتير الشراء وسندات الصرف والقبض المخزني")
     st.markdown("---")
@@ -349,7 +348,7 @@ elif menu == "📥 فواتير وسندات المخزن":
             df_vouch = pd.read_sql(f"SELECT voucher_type AS 'نوع السند', quantity AS 'الكمية', notes AS 'الملاحظات', voucher_date AS 'التاريخ' FROM inventory_vouchers WHERE item_code = '{sel_rep_item}'", conn)
             st.dataframe(df_vouch, use_container_width=True)
 
-# ================= 4. ORDERS MANAGEMENT =================
+# ================= 4. ORDERS =================
 elif menu == "📋 إدارة الطلبيات والإنتاج":
     st.title("📋 إدارة الطلبيات وسير العمل")
     st.markdown("---")
@@ -372,7 +371,7 @@ elif menu == "📋 إدارة الطلبيات والإنتاج":
     df_ords = pd.read_sql("SELECT order_id AS 'رقم الطلبية', customer_name AS 'العميل', ordered_quantity AS 'الكمية', current_stage AS 'المرحلة الحالية', order_status AS 'الحالة' FROM orders", conn)
     st.dataframe(df_ords, use_container_width=True)
 
-# ================= 5. SALES & INVOICES =================
+# ================= 5. SALES =================
 elif menu == "💰 فواتير البيع والمخرجات":
     st.title("💰 مخرجات الإنتاج وفواتير البيع النهائية")
     st.markdown("---")
@@ -381,7 +380,7 @@ elif menu == "💰 فواتير البيع والمخرجات":
     
     with st.form("sale_invoice_form"):
         st.subheader("إصدار فاتورة بيع نهائية وإغلاق الطلبية")
-        s_ord = st.selectbox("الطلبية المكتملة", options=ready_ords['order_id'].tolist(), format_func=lambda x: f"طلبية #{x} - {ready_ords[ready_ords['order_id'] == x]['customer_name'].values[0]}") if not ready_ords.empty else None
+        s_ord = st.selectbox("الطلبية المكتملة", options=ready_ords['order_id'].tolist(), format_func=lambda x: f"طلبية #{x} - {ready_ords[ready_ords['order_id'] == s_ord]['customer_name'].values[0]}") if not ready_ords.empty else None
         inv_n = st.text_input("رقم فاتورة البيع (مثال: INV-9001)")
         tot_amt = st.number_input("إجمالي مبلغ الفاتورة (ر.س)", min_value=0.0, value=1000.0)
         
@@ -399,7 +398,7 @@ elif menu == "💰 فواتير البيع والمخرجات":
     df_sales = pd.read_sql("SELECT invoice_no AS 'رقم الفاتورة', order_id AS 'رقم الطلبية', customer_name AS 'العميل', total_amount AS 'المبلغ (ر.س)', sale_date AS 'التاريخ' FROM sales", conn)
     st.dataframe(df_sales, use_container_width=True)
 
-# ================= 6. PRODUCTION WORKFLOW TRACKING =================
+# ================= 6. WORKFLOW =================
 elif menu == "⚙️ متابعة سير العمل ومراحل الإنتاج":
     st.title("⚙️ متابعة سير العمل ومراحل الإنتاج")
     st.markdown("---")
@@ -410,4 +409,130 @@ elif menu == "⚙️ متابعة سير العمل ومراحل الإنتاج"
             up_ord = st.selectbox("رقم الطلبية", options=act_ords['order_id'].tolist(), format_func=lambda x: f"طلبية #{x} - {act_ords[act_ords['order_id'] == x]['customer_name'].values[0]}")
             stg = st.selectbox("المرحلة الإنتاجية", ["قسم الطباعة", "قسم الفرز والتدبيس", "قسم التغرية والتعريش", "قسم البنر وسلك سكرين", "مكتملة تماماً"])
             
-            if st.form_submit_button("تحديث مرحلة الط
+            if st.form_submit_button("تحديث مرحلة الطلبية"):
+                cursor = conn.cursor()
+                cursor.execute("UPDATE orders SET current_stage = ? WHERE order_id = ?", (stg, up_ord))
+                if stg == "مكتملة تماماً":
+                    cursor.execute("UPDATE orders SET order_status = 'مكتملة ومسلمة' WHERE order_id = ?", (up_ord,))
+                conn.commit()
+                st.success("تم التحديث بنجاح!")
+                st.rerun()
+                
+    st.markdown("### جدول سير العمل الحالي")
+    df_flow = pd.read_sql("SELECT order_id AS 'رقم الطلبية', customer_name AS 'العميل', current_stage AS 'المرحلة', order_status AS 'الحالة' FROM orders", conn)
+    st.dataframe(df_flow, use_container_width=True)
+
+# ================= 7. WORKERS WAGES =================
+elif menu == "👥 تقارير وأجور العاملين":
+    st.title("👥 تسجيل أعمال العمال وتقارير الأجور اليومية والشهرية")
+    st.markdown("---")
+    
+    if role == "Worker" or role == "Admin":
+        with st.form("worker_task"):
+            st.subheader("تسجيل إنجاز مهمة جديدة")
+            ords_act = pd.read_sql("SELECT order_id, customer_name FROM orders WHERE order_status = 'قيد التنفيذ'", conn)
+            o_sel = st.selectbox("الطلبية", options=ords_act['order_id'].tolist(), format_func=lambda x: f"طلبية #{x} - {ords_act[ords_act['order_id'] == x]['customer_name'].values[0]}") if not ords_act.empty else None
+            t_name = st.text_input("اسم المهمة (مثال: طباعة أوفست، فرز)")
+            q_done = st.number_input("الكمية المنجزة", min_value=1.0, value=100.0)
+            p_rate = st.number_input("أجر القطعة (ر.س)", min_value=0.0, value=0.5)
+            
+            if st.form_submit_button("تسجيل المهمة وإضافتها لأجوري"):
+                if o_sel:
+                    cursor = conn.cursor()
+                    cursor.execute("INSERT INTO worker_tasks (worker_username, order_id, task_name, quantity_done, piece_rate) VALUES (?, ?, ?, ?, ?)", (st.session_state["username"], o_sel, t_name, q_done, p_rate))
+                    conn.commit()
+                    st.success("تم تسجيل المهمة وحساب الأجر بنجاح!")
+                    st.rerun()
+                    
+    st.markdown("### سجل الأجور والمهام")
+    if role == "Admin":
+        df_tasks = pd.read_sql("SELECT task_id AS 'معرف المهمة', worker_username AS 'اسم المستخدم', order_id AS 'رقم الطلبية', task_name AS 'المهمة', quantity_done AS 'الكمية', piece_rate AS 'أجر القطعة', total_wage AS 'إجمالي الأجر', task_date AS 'التاريخ' FROM worker_tasks", conn)
+    else:
+        df_tasks = pd.read_sql(f"SELECT task_id AS 'معرف المهمة', order_id AS 'رقم الطلبية', task_name AS 'المهمة', quantity_done AS 'الكمية', piece_rate AS 'أجر القطعة', total_wage AS 'إجمالي الأجر', task_date AS 'التاريخ' FROM worker_tasks WHERE worker_username = '{st.session_state['username']}'", conn)
+    st.dataframe(df_tasks, use_container_width=True)
+    
+    if role == "Admin" and not df_tasks.empty:
+        st.markdown("#### 🛠️ تعديل أو حذف مهمة مسجلة (صلاحية الأدمن)")
+        with st.form("edit_worker_task"):
+            t_id_to_edit = st.number_input("أدخل معرف المهمة (Task ID) للتعديل أو الحذف", min_value=1, step=1)
+            new_q = st.number_input("الكمية المعدلة", value=100.0)
+            new_r = st.number_input("أجر القطعة المعدل", value=0.5)
+            
+            col_t1, col_t2 = st.columns(2)
+            with col_t1:
+                edt_btn = st.form_submit_button("تعديل المهمة")
+            with col_t2:
+                del_btn = st.form_submit_button("حذف المهمة")
+                
+            if edt_btn:
+                cursor = conn.cursor()
+                cursor.execute("UPDATE worker_tasks SET quantity_done = ?, piece_rate = ? WHERE task_id = ?", (new_q, new_r, t_id_to_edit))
+                conn.commit()
+                st.success("تم تعديل المهمة بنجاح!")
+                st.rerun()
+            if del_btn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM worker_tasks WHERE task_id = ?", (t_id_to_edit,))
+                conn.commit()
+                st.success("تم حذف المهمة بنجاح!")
+                st.rerun()
+
+# ================= 8. PASSWORD CHANGE =================
+elif menu == "🔐 إعدادات الحساب وكلمة المرور":
+    st.title("🔐 تغيير كلمة المرور الخاصة بحسابك")
+    st.markdown("---")
+    
+    with st.form("change_pass_form"):
+        old_p = st.text_input("كلمة المرور الحالية", type="password")
+        new_p = st.text_input("كلمة المرور الجديدة", type="password")
+        conf_p = st.text_input("تأكيد كلمة المرور الجديدة", type="password")
+        
+        if st.form_submit_button("تحديث كلمة المرور"):
+            conn_u = get_connection()
+            cur_u = conn_u.cursor()
+            cur_u.execute("SELECT password FROM users WHERE username = ?", (st.session_state["username"],))
+            db_pass = cur_u.fetchone()[0]
+            
+            if old_p == db_pass:
+                if new_p == conf_p and new_p != "":
+                    cur_u.execute("UPDATE users SET password = ? WHERE username = ?", (new_p, st.session_state["username"]))
+                    conn_u.commit()
+                    conn_u.close()
+                    st.success("تم تغيير كلمة المرور بنجاح!")
+                else:
+                    st.error("كلمة المرور الجديدة غير متطابقة أو فارغة.")
+            else:
+                st.error("كلمة المرور الحالية غير صحيحة.")
+            conn_u.close()
+
+# ================= 9. ADMIN USERS =================
+elif menu == "🛠️ إدارة المستخدمين والصلاحيات الشاملة":
+    if role != "Admin":
+        st.error("عذراً، هذه الصفحة مخصصة لمدير النظام (Admin) فقط.")
+    else:
+        st.title("🛠️ إدارة المستخدمين والصلاحيات الشاملة (تحكم كامل)")
+        st.markdown("---")
+        
+        with st.form("add_user_full"):
+            st.subheader("إضافة مستخدم جديد وتحديد دوره")
+            u_name = st.text_input("اسم المستخدم")
+            u_pass = st.text_input("كلمة المرور")
+            u_full = st.text_input("الاسم الكامل للعامل")
+            u_dept = st.text_input("القسم")
+            u_role = st.selectbox("الدور والصلاحية", ["Admin", "Inventory", "Worker"])
+            
+            if st.form_submit_button("إضافة المستخدم للنظام"):
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute("INSERT INTO users (username, password, full_name, department, role, allowed_screens) VALUES (?, ?, ?, ?, ?, 'All')", (u_name, u_pass, u_full, u_dept, u_role))
+                    conn.commit()
+                    st.success("تم إضافة المستخدم بنجاح!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"خطأ: اسم المستخدم موجود مسبقاً ({e})")
+                    
+        st.markdown("### قائمة المستخدمين والصلاحيات الحالية")
+        df_usr = pd.read_sql("SELECT username AS 'اسم المستخدم', full_name AS 'الاسم الكامل', department AS 'القسم', role AS 'الصلاحية' FROM users", conn)
+        st.dataframe(df_usr, use_container_width=True)
+
+conn.close()
