@@ -60,7 +60,7 @@ def init_db():
         )
     ''')
     
-    # 4. Purchases Header & Details (فواتير الشراء متعددة الأصناف)
+    # 4. Purchases Header & Details
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS purchase_invoices (
             inv_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,7 +84,7 @@ def init_db():
         )
     ''')
     
-    # 5. Sales Header & Details (فواتير البيع متعددة الأصناف)
+    # 5. Sales Header & Details
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS sales_invoices (
             s_inv_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -319,7 +319,6 @@ elif menu == "📥 فواتير الشراء متعددة الأصناف":
         if raw_items.empty:
             st.warning("يرجى إضافة مواد خام للمستودع أولاً.")
         else:
-            # We will allow adding up to 3 items in one invoice for simplicity and robustness
             st.markdown("##### الصنف الأول")
             i1 = st.selectbox("اختر المادة الخام 1", options=raw_items['item_code'].tolist(), format_func=lambda x: raw_items[raw_items['item_code'] == x]['item_name'].values[0], key="i1")
             q1 = st.number_input("الكمية 1", min_value=0.0, value=0.0, key="q1")
@@ -370,12 +369,11 @@ elif menu == "📥 فواتير الشراء متعددة الأصناف":
                     except Exception as e:
                         st.error(f"خطأ: رقم الفاتورة موجود مسبقاً أو بيانات غير صحيحة ({e})")
                 else:
-                    st.warning("يرجى إدخال رقم الفاتورة اسم المورد.")
+                    st.warning("يرجى إدخال رقم الفاتورة واسم المورد.")
 
     st.markdown("### سجل فواتير الشراء السابقة")
     df_p_inv = pd.read_sql("SELECT invoice_no AS 'رقم الفاتورة', supplier_name AS 'المورد', total_invoice_amount AS 'إجمالي الفاتورة', purchase_date AS 'التاريخ' FROM purchase_invoices", conn)
     st.dataframe(df_p_inv, use_container_width=True)
-
 # ================= 4. MULTI-ITEM SALES INVOICES =================
 elif menu == "💰 فواتير البيع متعددة الأصناف":
     st.title("💰 فواتير البيع متعددة الأصناف والمخرجات")
@@ -420,7 +418,7 @@ elif menu == "💰 فواتير البيع متعددة الأصناف":
                             tot_sale += st2
                             s_items_to_save.append((s_i2, s_q2, s_pr2, st2))
                             
-            if s_items_to_save:
+                        if s_items_to_save:
                             cursor.execute("INSERT INTO sales_invoices (invoice_no, order_id, customer_name, total_invoice_amount) VALUES (?, ?, ?, ?)", (s_inv_no, s_ord, cust_name, tot_sale))
                             for sitm in s_items_to_save:
                                 cursor.execute("INSERT INTO sales_items (invoice_no, item_code, quantity, unit_price, total_price) VALUES (?, ?, ?, ?, ?)", (s_inv_no, sitm[0], sitm[1], sitm[2], sitm[3]))
@@ -540,7 +538,6 @@ elif menu == "👥 تقارير وأجور العاملين":
                 conn.commit()
                 st.success("تم حذف المهمة بنجاح!")
                 st.rerun()
-
 # ================= 8. PASSWORD CHANGE =================
 elif menu == "🔐 إعدادات الحساب وكلمة المرور":
     st.title("🔐 تغيير كلمة المرور الخاصة بحسابك")
