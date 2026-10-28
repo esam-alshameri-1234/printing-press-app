@@ -413,8 +413,150 @@ elif menu == "💰 فواتير البيع (10+ اصناف)":
     df_s_all = pd.read_sql("SELECT invoice_no AS 'رقم الفاتورة', customer_name AS 'العميل', total_amount AS 'إجمالي الفاتورة (ر.ي)', sale_date AS 'التاريخ' FROM sales_invoices", conn)
     st.dataframe(df_s_all, use_container_width=True)
 
-df_j = pd.read_sql("SELECT entry_id AS 'معرف', entry_date AS 'التاريخ', description AS 'البيان', account_code AS 'رقم الحساب', debit AS 'مدين (ر.ي)', credit AS 'دائن (ر.ي)' FROM journal_entries", conn)
+# ================= 6. ORDERS & WORKFLOW (SPLIT INTO 2 TABS) =================
+elif menu == "📋 إدارة الطلبيات وسير العمل":
+    st.title("📋 إدارة الطلبيات وسير العمل ومراحل الإنتاج")
+    st.markdown("---")
+    
+    tab_ow1, tab_ow2 = st.tabs(["1. الطلبيات (Orders)", "2. سير العمل ومراحل الإنتاج (Workflow)"])
+    
+    with tab_ow1:
+        st.subheader("تسجيل ومتابعة الطلبيات الجديدة")
+        with st.form("new_order_split_form"):
+            c_name = st.text_input("اسم العميل")
+            all_fin = pd.read_sql("SELECT item_code, item_name FROM items", conn)
+            ord_item = st.selectbox("اسم الصنف", options=all_fin['item_code'].tolist(), format_func=lambda x: all_fin.loc[all_fin['item_code'] == x, 'item_name'].values[0]) if not all_fin.empty else None
+            ord_unit = st.text_input("الوحدة (قطعة، دفتر، رزمة)", value="قطعة")
+            ord_qty = st.number_input("الكمية", min_value=1.0, value=100.0)
+            start_dept = st.selectbox("القسم الذي سيبدأ بالتنفيذ", ["قسم الطباعة", "قسم الفرز والتدبيس", "قسم التغرية والتعريش", "قسم البنر وسلك سكرين"])
+            emp_name = st.text_input("اسم الموظف المسؤول عن الطلبية")
+            
+            if st.form_submit_button("حفظ الطلبية في النظام"):
+                if ord_item and c_name:
+                    cursor = conn.cursor()
+                    cursor.execute("INSERT INTO orders (customer_name, item_code, unit, quantity, start_department, assigned_employee, execution_status) VALUES (?, ?, ?, ?, ?, ?, 'غير منفذة')", (c_name, ord_item, ord_unit, ord_qty, start_dept, emp_name))
+                    conn.commit()
+                    st.success("تم تسجيل الطلبية بنجاح!")
+                    st.rerun()
+                    
+        st.markdown("### 📋 تقرير الطلبيات غير المنفذة")
+        df_unexec = pd.read_sql(""" SELECT o.order_id AS 'رقم الطلبية', o.customer_name AS 'العميل', i.item_name AS 'الصنف', o.unit AS 'الوحدة', o.quantity AS 'الكمية', o.start_department AS 'قسم البداية', o.assigned_employee AS 'الموظف المسؤول' FROM orders o JOIN items i ON o.item_code = i.item_code WHERE o.execution_status = 'غير منفذة' """, conn)
+        st.dataframe(df_unexec, use_container_width=True)
 
+    with tab_ow2:
+        st.subheader("متابعة سير العمل ومراحل الإنتاج وتفاصيل التنفيذ")
+        active_ords = pd.read_sql("SELECT order_id, customer_name FROM orders", conn)
+        
+        with st.form("workflow_task_form"):
+            sel_ord_id = st.selectbox("رقم الطلبية", options=active_ords['order_id'].tolist(), format_func=lambda x: f"طلبية #{x} - {active_ords.loc[active_ords['order_id'] == x, 'customer_name'].values[0]}") if not active_ords.empty else None
+            exec_dept = st.selectbox("القسم المنفذ", ["قسم الطباعة", "قسم الفرز والتدبيس", "قسم التغرية والتعريش", "قسم البنر وسلك سكرين"])
+            task_type = st.selectbox("نوع المهمة المنفذة", ["طباعة", "فرز", "تدبيس", "تعريش", "ربط", "كبس", "تغليف"])
+            exec_emp = st.text_input("الموظف المنفذ")
+            wf_item = st.selectbox("اسم الصنف المنفذ", options=all_fin['item_code'].tolist(), format_func=lambda x: all_fin.loc[all_fin['item_code'] == x, 'item_name'].values[0]) if not all_fin.empty else None
+            exec_qty = st.number_input("الكمية المنفذة", min_value=1.0, value=100.0)
+            exec_hours = st.number_input("عدد ساعات التنفيذ", min_value=0.1, value=2.0)
+            wf_notes = st.text_area("ملاحظات إضافية")
+            
+            if st.form_submit_button("💾 حفظ المهام المدخلة إلى النظام"):
+                if sel_ord_id and wf_item:
+                    cursor = conn.cursor()
+                    cursor.execute("INSERT INTO workflow_tasks (order_id, executing_dept, task_type, executing_employee, item_code, executed_quantity, execution_hours, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (sel_ord_id, exec_dept, task_type, exec_emp, wf_item, exec_qty, exec_hours, wf_notes))
+                    cursor.execute("UPDATE orders SET execution_status = 'منفذة جزئياً' WHERE order_id = ?", (sel_ord_id,))
+                    conn.commit()
+                    st.success("تم حفظ مهمة سير العمل وتحديث حالة الطلبية بنجاح!")
+                    st.rerun()
+                    
+        st.markdown("### سجل مهام سير العمل المسجلة")
+        df_wf_log = pd.read_sql(""" SELECT w.task_log_id AS 'معرف', w.order_id AS 'رقم الطلبية', w.executing_dept AS 'القسم', w.task_type AS 'نوع المهمة', w.executing_employee AS 'الموظف', i.item_name AS 'الصنف', w.executed_quantity AS 'الكمية المنفذة', w.execution_hours AS 'الساعات', w.execution_date AS 'التاريخ' FROM workflow_tasks w JOIN items i ON w.item_code = i.item_code """, conn)
+        st.dataframe(df_wf_log, use_container_width=True)
+
+# ================= 7. DETAILED WORKER & TASK REPORTS =================
+elif menu == "📈 تقارير أعمال العمال التفصيلية":
+    st.title("📈 تقارير أعمال العمال وسير العمل التفصيلية")
+    st.markdown("---")
+    
+    st.markdown("### فلترة واستخراج التقارير")
+    col_r1, col_r2 = st.columns(2)
+    with col_r1:
+        rep_emp = st.text_input("بحث باسم الموظف (اتركه فارغاً للجميع)")
+    with col_r2:
+        rep_task = st.selectbox("نوع العمل", ["الكل", "طباعة", "فرز", "تدبيس", "تعريش", "ربط", "كبس", "تغليف"])
+        
+    query_rep = """ SELECT w.task_log_id AS 'معرف', w.order_id AS 'الطلبية', w.executing_dept AS 'القسم', w.task_type AS 'نوع العمل', w.executing_employee AS 'الموظف', i.item_name AS 'الصنف', w.executed_quantity AS 'الكمية', w.execution_hours AS 'الساعات', w.execution_date AS 'التاريخ' FROM workflow_tasks w JOIN items i ON w.item_code = i.item_code WHERE 1=1 """
+    if rep_emp:
+        query_rep += f" AND w.executing_employee LIKE '%{rep_emp}%'"
+    if rep_task != "الكل":
+        query_rep += f" AND w.task_type = '{rep_task}'"
+        
+    df_report = pd.read_sql(query_rep, conn)
+    st.dataframe(df_report, use_container_width=True)
+    
+    # Export options
+    if not df_report.empty:
+        col_ex1, col_ex2 = st.columns(2)
+        with col_ex1:
+            out_ex = io.BytesIO()
+            with pd.ExcelWriter(out_ex, engine='openpyxl') as writer:
+                df_report.to_excel(writer, sheet_name='تقرير العمال', index=False)
+            out_ex.seek(0)
+            st.download_button("📥 تصدير التقرير إكسل (.xlsx)", data=out_ex, file_name="Worker_Detailed_Report.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        with col_ex2:
+            csv_data = df_report.to_csv(index=False).encode('utf-8-sig')
+            st.download_button("📥 تصدير التقرير CSV/Word", data=csv_data, file_name="Worker_Detailed_Report.csv", mime="text/csv")
+
+# ================= 8. ACCOUNTING MODULE =================
+elif menu == "📑 الدليل المحاسبي والقيود والسندات":
+    st.title("📑 الدليل المحاسبي، القيود المزدوجة، والسندات المالية")
+    st.markdown("---")
+    
+    t_acc1, t_acc2, t_acc3, t_acc4 = st.tabs(["الدليل المحاسبي", "قيود اليومية المزدوجة", "سندات القبض والصرف", "ميزان المراجعة والحسابات الختامية"])
+    
+    with t_acc1:
+        df_acc = pd.read_sql("SELECT account_code AS 'رقم الحساب', account_name AS 'اسم الحساب', account_type AS 'طبيعة الحساب' FROM chart_of_accounts", conn)
+        st.dataframe(df_acc, use_container_width=True)
+        
+        with st.form("new_acc_form"):
+            st.subheader("إضافة حساب جديد للدليل المحاسبي")
+            ac_code = st.text_input("رقم الحساب (مثال: 105)")
+            ac_name = st.text_input("اسم الحساب")
+            ac_type = st.selectbox("طبيعة الحساب", ["أصول", "خصوم", "إيرادات", "مصروفات", "حقوق ملكية"])
+            if st.form_submit_button("إضافة الحساب"):
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute("INSERT INTO chart_of_accounts VALUES (?, ?, ?)", (ac_code, ac_name, ac_type))
+                    conn.commit()
+                    st.success("تمت إضافة الحساب بنجاح!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"خطأ: الحساب موجود مسبقاً ({e})")
+
+    with t_acc2:
+        with st.form("journal_entry_form"):
+            st.subheader("إثبات قيد يومي مزدوج (مدين / دائن)")
+            j_desc = st.text_input("بيان القيد / وصف العملية")
+            accounts_list = pd.read_sql("SELECT account_code, account_name FROM chart_of_accounts", conn)
+            
+            ac_deb = st.selectbox("الحساب المدين", options=accounts_list['account_code'].tolist(), format_func=lambda x: accounts_list.loc[accounts_list['account_code'] == x, 'account_name'].values[0])
+            deb_amt = st.number_input("مبلغ المدين (ر.ي)", min_value=0.0, value=1000.0)
+            
+            ac_cred = st.selectbox("الحساب الدائن", options=accounts_list['account_code'].tolist(), format_func=lambda x: accounts_list.loc[accounts_list['account_code'] == x, 'account_name'].values[0])
+            cred_amt = st.number_input("مبلغ الدائن (ر.ي)", min_value=0.0, value=1000.0)
+            
+            if st.form_submit_button("ترحيل القيد المزدوج"):
+                if deb_amt == cred_amt and deb_amt > 0:
+                    cursor = conn.cursor()
+                    # Insert debit entry
+                    cursor.execute("INSERT INTO journal_entries (description, account_code, debit, credit) VALUES (?, ?, ?, 0)", (j_desc, ac_deb, deb_amt))
+                    # Insert credit entry
+                    cursor.execute("INSERT INTO journal_entries (description, account_code, debit, credit) VALUES (?, ?, 0, ?)", (j_desc, ac_cred, cred_amt))
+                    conn.commit()
+                    st.success("تم ترحيل القيد المحاسبي بنجاح!")
+                    st.rerun()
+                else:
+                    st.error("خطأ: يجب أن يتساوى الطرف المدين مع الطرف الدائن وأن يكون المبلغ أكبر من صفر.")
+                    
+        st.markdown("### سجل قيود اليومية المحاسبية")
+        df_j = pd.read_sql("SELECT entry_id AS 'معرف', entry_date AS 'التاريخ', description AS 'البيان', account_code AS 'رقم الحساب', debit AS 'مدين (ر.ي)', credit AS 'دائن (ر.ي)' FROM journal_entries", conn)
         st.dataframe(df_j, use_container_width=True)
 
     with t_acc3:
