@@ -413,7 +413,8 @@ elif menu == "💰 فواتير البيع (10+ اصناف)":
     df_s_all = pd.read_sql("SELECT invoice_no AS 'رقم الفاتورة', customer_name AS 'العميل', total_amount AS 'إجمالي الفاتورة (ر.ي)', sale_date AS 'التاريخ' FROM sales_invoices", conn)
     st.dataframe(df_s_all, use_container_width=True)
 
-'معرف', entry_date AS 'التاريخ', description AS 'البيان', account_code AS 'رقم الحساب', debit AS 'مدين (ر.ي)', credit AS 'دائن (ر.ي)' FROM journal_entries", conn)
+df_j = pd.read_sql("SELECT entry_id AS 'معرف', entry_date AS 'التاريخ', description AS 'البيان', account_code AS 'رقم الحساب', debit AS 'مدين (ر.ي)', credit AS 'دائن (ر.ي)' FROM journal_entries", conn)
+
         st.dataframe(df_j, use_container_width=True)
 
     with t_acc3:
