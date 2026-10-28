@@ -2,6 +2,7 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
+import io
 
 st.set_page_config(
     page_title="نظام المطبعة الشامل والذكي (ERP)",
@@ -20,7 +21,7 @@ def init_db():
     conn = get_connection()
     cursor = conn.cursor()
     
-    # 1. Users Table
+    # 1. Users Table with granular permissions
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -110,31 +111,21 @@ def init_db():
         )
     ''')
     
-    # 6. Inventory Vouchers
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS inventory_vouchers (
-            voucher_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            voucher_type TEXT NOT NULL,
-            item_code TEXT,
-            quantity REAL NOT NULL,
-            notes TEXT,
-            voucher_date TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(item_code) REFERENCES items(item_code)
-        )
-    ''')
-    
-    # 7. Worker Tasks & Wages
+    # 6. Worker Tasks & Wages (Updated to support stage, item and admin piece rate)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS worker_tasks (
             task_id INTEGER PRIMARY KEY AUTOINCREMENT,
             worker_username TEXT,
             order_id INTEGER,
-            task_name TEXT NOT NULL,
+            stage_name TEXT NOT NULL,
+            item_code TEXT NOT NULL,
+            task_description TEXT NOT NULL,
             quantity_done REAL NOT NULL,
             piece_rate REAL DEFAULT 0.0,
             total_wage REAL GENERATED ALWAYS AS (quantity_done * piece_rate) VIRTUAL,
             task_date TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(order_id) REFERENCES orders(order_id)
+            FOREIGN KEY(order_id) REFERENCES orders(order_id),
+            FOREIGN KEY(item_code) REFERENCES items(item_code)
         )
     ''')
     
@@ -187,7 +178,7 @@ if not st.session_state["logged_in"]:
         st.info("💡 **حساب الأدمن الافتراضي:** `admin` / كلمة المرور: `1234`")
     st.stop()
 
-# --- SIDEBAR MENU ---
+# --- SIDEBAR MENU & PERMISSIONS CHECK ---
 role = st.session_state["role"]
 full_name = st.session_state["full_name"]
 allowed = st.session_state["allowed_screens"]
@@ -196,21 +187,25 @@ st.sidebar.title(f"👤 {full_name}")
 st.sidebar.markdown(f"**الصلاحية:** `{role}`")
 st.sidebar.markdown("---")
 
-menu_options = [
-    "📊 لوحة المؤشرات والتحكم",
-    "📦 إدارة المخزون والأصناف",
-    "📥 فواتير الشراء متعددة الأصناف",
-    "💰 فواتير البيع متعددة الأصناف",
-    "📋 إدارة الطلبيات والإنتاج",
-    "⚙️ متابعة سير العمل ومراحل الإنتاج",
-    "👥 تقارير وأجور العاملين",
-    "🔐 إعدادات الحساب وكلمة المرور"
-]
+all_menu_options = {
+    "📊 لوحة المؤشرات والتحكم": "Dashboard",
+    "📦 إدارة المخزون والأصناف": "Inventory",
+    "📥 فواتير الشراء متعددة الأصناف": "Purchases",
+    "💰 فواتير البيع متعددة الأصناف": "Sales",
+    "📋 إدارة الطلبيات والإنتاج": "Orders",
+    "⚙️ متابعة سير العمل ومراحل الإنتاج": "Workflow",
+    "👥 تسجيل وأجور العاملين": "Workers",
+    "🔐 إعدادات الحساب وكلمة المرور": "Password",
+    "🛠️ إدارة المستخدمين والصلاحيات": "Admin_Users"
+}
 
-if role == "Admin":
-    menu_options.append("🛠️ إدارة المستخدمين والصلاحيات الشاملة")
+# Filter menus based on user permissions
+available_menus = []
+for title, key in all_menu_options.items():
+    if role == "Admin" or allowed == "All" or key in allowed.split(","):
+        available_menus.append(title)
 
-menu = st.sidebar.radio("القائمة الرئيسية", menu_options)
+menu = st.sidebar.radio("القائمة الرئيسية", available_menus)
 
 if st.sidebar.button("🚪 تسجيل الخروج", use_container_width=True):
     st.session_state["logged_in"] = False
@@ -250,58 +245,56 @@ elif menu == "📦 إدارة المخزون والأصناف":
         st.dataframe(df_items, use_container_width=True)
         
     with tab2:
-        if role == "Admin" or allowed == "All":
-            with st.form("add_item"):
-                c1, c2 = st.columns(2)
-                with c1:
-                    icode = st.text_input("كود الصنف (مثال: RM-01)")
-                    iname = st.text_input("اسم الصنف")
-                    cat = st.selectbox("التصنيف", ["مادة خام", "منتج نهائي"])
-                with c2:
-                    unit = st.text_input("الوحدة (رزمة، قطعة، لتر)")
-                    stock = st.number_input("الرصيد الابتدائي", min_value=0.0, value=0.0)
-                    price = st.number_input("سعر الوحدة", min_value=0.0, value=0.0)
-                
-                if st.form_submit_button("حفظ الصنف الجديد"):
-                    try:
-                        cursor = conn.cursor()
-                        cursor.execute("INSERT INTO items VALUES (?, ?, ?, ?, ?, ?)", (icode, iname, cat, unit, stock, price))
-                        conn.commit()
-                        st.success("تم إضافة الصنف بنجاح!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"خطأ: الكود موجود مسبقاً ({e})")
+        with st.form("add_item"):
+            c1, c2 = st.columns(2)
+            with c1:
+                icode = st.text_input("كود الصنف (مثال: RM-01)")
+                iname = st.text_input("اسم الصنف")
+                cat = st.selectbox("التصنيف", ["مادة خام", "منتج نهائي"])
+            with c2:
+                unit = st.text_input("الوحدة (رزمة، قطعة، لتر)")
+                stock = st.number_input("الرصيد الابتدائي", min_value=0.0, value=0.0)
+                price = st.number_input("سعر الوحدة", min_value=0.0, value=0.0)
+            
+            if st.form_submit_button("حفظ الصنف الجديد"):
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute("INSERT INTO items VALUES (?, ?, ?, ?, ?, ?)", (icode, iname, cat, unit, stock, price))
+                    conn.commit()
+                    st.success("تم إضافة الصنف بنجاح!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"خطأ: الكود موجود مسبقاً ({e})")
 
     with tab3:
-        if role == "Admin" or allowed == "All":
-            items_list = pd.read_sql("SELECT item_code, item_name FROM items", conn)
-            if not items_list.empty:
-                sel_item = st.selectbox("اختر الصنف للتعديل أو الحذف", options=items_list['item_code'].tolist(), format_func=lambda x: items_list[items_list['item_code'] == x]['item_name'].values[0])
-                current_data = pd.read_sql(f"SELECT * FROM items WHERE item_code = '{sel_item}'", conn).iloc[0]
+        items_list = pd.read_sql("SELECT item_code, item_name FROM items", conn)
+        if not items_list.empty:
+            sel_item = st.selectbox("اختر الصنف للتعديل أو الحذف", options=items_list['item_code'].tolist(), format_func=lambda x: items_list[items_list['item_code'] == x]['item_name'].values[0])
+            current_data = pd.read_sql(f"SELECT * FROM items WHERE item_code = '{sel_item}'", conn).iloc[0]
+            
+            with st.form("edit_item_form"):
+                new_name = st.text_input("اسم الصنف الجديد", value=current_data['item_name'])
+                new_price = st.number_input("سعر الوحدة الجديد", value=float(current_data['unit_price']))
+                new_stock = st.number_input("تعديل الرصيد الحالي", value=float(current_data['current_stock']))
                 
-                with st.form("edit_item_form"):
-                    new_name = st.text_input("اسم الصنف الجديد", value=current_data['item_name'])
-                    new_price = st.number_input("سعر الوحدة الجديد", value=float(current_data['unit_price']))
-                    new_stock = st.number_input("تعديل الرصيد الحالي", value=float(current_data['current_stock']))
+                col_e1, col_e2 = st.columns(2)
+                with col_e1:
+                    update_btn = st.form_submit_button("تعديل بيانات الصنف")
+                with col_e2:
+                    delete_btn = st.form_submit_button("حذف الصنف نهائياً")
                     
-                    col_e1, col_e2 = st.columns(2)
-                    with col_e1:
-                        update_btn = st.form_submit_button("تعديل بيانات الصنف")
-                    with col_e2:
-                        delete_btn = st.form_submit_button("حذف الصنف نهائياً")
-                        
-                    if update_btn:
-                        cursor = conn.cursor()
-                        cursor.execute("UPDATE items SET item_name = ?, unit_price = ?, current_stock = ? WHERE item_code = ?", (new_name, new_price, new_stock, sel_item))
-                        conn.commit()
-                        st.success("تم تعديل بيانات الصنف بنجاح!")
-                        st.rerun()
-                    if delete_btn:
-                        cursor = conn.cursor()
-                        cursor.execute("DELETE FROM items WHERE item_code = ?", (sel_item,))
-                        conn.commit()
-                        st.success("تم حذف الصنف بنجاح!")
-                        st.rerun()
+                if update_btn:
+                    cursor = conn.cursor()
+                    cursor.execute("UPDATE items SET item_name = ?, unit_price = ?, current_stock = ? WHERE item_code = ?", (new_name, new_price, new_stock, sel_item))
+                    conn.commit()
+                    st.success("تم تعديل بيانات الصنف بنجاح!")
+                    st.rerun()
+                if delete_btn:
+                    cursor = conn.cursor()
+                    cursor.execute("DELETE FROM items WHERE item_code = ?", (sel_item,))
+                    conn.commit()
+                    st.success("تم حذف الصنف بنجاح!")
+                    st.rerun()
 
 # ================= 3. MULTI-ITEM PURCHASE INVOICES =================
 elif menu == "📥 فواتير الشراء متعددة الأصناف":
@@ -319,20 +312,13 @@ elif menu == "📥 فواتير الشراء متعددة الأصناف":
         if raw_items.empty:
             st.warning("يرجى إضافة مواد خام للمستودع أولاً.")
         else:
-            st.markdown("##### الصنف الأول")
-            i1 = st.selectbox("اختر المادة الخام 1", options=raw_items['item_code'].tolist(), format_func=lambda x: raw_items[raw_items['item_code'] == x]['item_name'].values[0], key="i1")
+            i1 = st.selectbox("المادة الخام 1", options=raw_items['item_code'].tolist(), format_func=lambda x: raw_items[raw_items['item_code'] == x]['item_name'].values[0], key="i1")
             q1 = st.number_input("الكمية 1", min_value=0.0, value=0.0, key="q1")
             pr1 = st.number_input("سعر الوحدة 1", min_value=0.0, value=0.0, key="pr1")
             
-            st.markdown("##### الصنف الثاني (اختياري)")
-            i2 = st.selectbox("اختر المادة الخام 2", options=["لا يوجد"] + raw_items['item_code'].tolist(), format_func=lambda x: "لا يوجد" if x=="لا يوجد" else raw_items[raw_items['item_code'] == x]['item_name'].values[0], key="i2")
+            i2 = st.selectbox("المادة الخام 2 (اختياري)", options=["لا يوجد"] + raw_items['item_code'].tolist(), format_func=lambda x: "لا يوجد" if x=="لا يوجد" else raw_items[raw_items['item_code'] == x]['item_name'].values[0], key="i2")
             q2 = st.number_input("الكمية 2", min_value=0.0, value=0.0, key="q2")
             pr2 = st.number_input("سعر الوحدة 2", min_value=0.0, value=0.0, key="pr2")
-            
-            st.markdown("##### الصنف الثالث (اختياري)")
-            i3 = st.selectbox("اختر المادة الخام 3", options=["لا يوجد"] + raw_items['item_code'].tolist(), format_func=lambda x: "لا يوجد" if x=="لا يوجد" else raw_items[raw_items['item_code'] == x]['item_name'].values[0], key="i3")
-            q3 = st.number_input("الكمية 3", min_value=0.0, value=0.0, key="q3")
-            pr3 = st.number_input("سعر الوحدة 3", min_value=0.0, value=0.0, key="pr3")
             
             if st.form_submit_button("حفظ فاتورة الشراء وتحديث المخزن"):
                 if p_inv_no and p_supplier:
@@ -351,11 +337,6 @@ elif menu == "📥 فواتير الشراء متعددة الأصناف":
                             total_inv += t2
                             items_to_save.append((i2, q2, pr2, t2))
                             
-                        if i3 != "لا يوجد" and q3 > 0:
-                            t3 = q3 * pr3
-                            total_inv += t3
-                            items_to_save.append((i3, q3, pr3, t3))
-                            
                         if items_to_save:
                             cursor.execute("INSERT INTO purchase_invoices (invoice_no, supplier_name, total_invoice_amount) VALUES (?, ?, ?)", (p_inv_no, p_supplier, total_inv))
                             for itm in items_to_save:
@@ -367,14 +348,15 @@ elif menu == "📥 فواتير الشراء متعددة الأصناف":
                         else:
                             st.error("يرجى إدخال صنف واحد على الأقل بكمية صحيحة.")
                     except Exception as e:
-                        st.error(f"خطأ: رقم الفاتورة موجود مسبقاً أو بيانات غير صحيحة ({e})")
+                        st.error(f"خطأ: رقم الفاتورة موجود مسبقاً ({e})")
                 else:
                     st.warning("يرجى إدخال رقم الفاتورة واسم المورد.")
 
     st.markdown("### سجل فواتير الشراء السابقة")
     df_p_inv = pd.read_sql("SELECT invoice_no AS 'رقم الفاتورة', supplier_name AS 'المورد', total_invoice_amount AS 'إجمالي الفاتورة', purchase_date AS 'التاريخ' FROM purchase_invoices", conn)
     st.dataframe(df_p_inv, use_container_width=True)
-# ================= 4. MULTI-ITEM SALES INVOICES =================
+
+# ================= 4. MULTI-ITEM SALES INVOICES (CORRECTED) =================
 elif menu == "💰 فواتير البيع متعددة الأصناف":
     st.title("💰 فواتير البيع متعددة الأصناف والمخرجات")
     st.markdown("---")
@@ -383,7 +365,13 @@ elif menu == "💰 فواتير البيع متعددة الأصناف":
     
     with st.form("multi_sale_form"):
         st.subheader("إصدار فاتورة بيع مرتبطة بالطلبية ومشتملة على عدة اصناف")
-        s_ord = st.selectbox("اختر الطلبية المكتملة", options=ready_ords['order_id'].tolist(), format_func=lambda x: f"طلبية #{x} - {ready_ords[ready_ords['order_id'] == s_ord]['customer_name'].values[0]}") if not ready_ords.empty else None
+        
+        if ready_ords.empty:
+            st.info("لا توجد طلبيات مكتملة أو غير مفوترة حالياً.")
+            s_ord = None
+        else:
+            s_ord = st.selectbox("اختر الطلبية", options=ready_ords['order_id'].tolist(), format_func=lambda x: f"طلبية #{x} - {ready_ords.loc[ready_ords['order_id'] == x, 'customer_name'].values[0]}")
+            
         s_inv_no = st.text_input("رقم فاتورة البيع النهائية")
         
         all_itms = pd.read_sql("SELECT item_code, item_name FROM items", conn)
@@ -403,7 +391,7 @@ elif menu == "💰 فواتير البيع متعددة الأصناف":
             if st.form_submit_button("إصدار فاتورة البيع وإغلاق الطلبية"):
                 if s_ord and s_inv_no:
                     try:
-                        cust_name = ready_ords[ready_ords['order_id'] == s_ord]['customer_name'].values[0]
+                        cust_name = ready_ords.loc[ready_ords['order_id'] == s_ord, 'customer_name'].values[0]
                         cursor = conn.cursor()
                         tot_sale = 0
                         s_items_to_save = []
@@ -468,7 +456,7 @@ elif menu == "⚙️ متابعة سير العمل ومراحل الإنتاج"
     act_ords = pd.read_sql("SELECT order_id, customer_name FROM orders WHERE order_status = 'قيد التنفيذ'", conn)
     if not act_ords.empty:
         with st.form("stage_form"):
-            up_ord = st.selectbox("رقم الطلبية", options=act_ords['order_id'].tolist(), format_func=lambda x: f"طلبية #{x} - {act_ords[act_ords['order_id'] == x]['customer_name'].values[0]}")
+            up_ord = st.selectbox("رقم الطلبية", options=act_ords['order_id'].tolist(), format_func=lambda x: f"طلبية #{x} - {act_ords.loc[act_ords['order_id'] == x, 'customer_name'].values[0]}")
             stg = st.selectbox("المرحلة الإنتاجية", ["قسم الطباعة", "قسم الفرز والتدبيس", "قسم التغرية والتعريش", "قسم البنر وسلك سكرين", "مكتملة تماماً"])
             
             if st.form_submit_button("تحديث مرحلة الطلبية"):
@@ -483,61 +471,79 @@ elif menu == "⚙️ متابعة سير العمل ومراحل الإنتاج"
     st.markdown("### جدول سير العمل الحالي")
     df_flow = pd.read_sql("SELECT order_id AS 'رقم الطلبية', customer_name AS 'العميل', current_stage AS 'المرحلة', order_status AS 'الحالة' FROM orders", conn)
     st.dataframe(df_flow, use_container_width=True)
-
-# ================= 7. WORKERS WAGES =================
-elif menu == "👥 تقارير وأجور العاملين":
-    st.title("👥 تسجيل أعمال العمال وتقارير الأجور اليومية والشهرية")
+# ================= 7. WORKERS WAGES & TASKS (Stage, Item, Admin Rate) =================
+elif menu == "👥 تسجيل وأجور العاملين":
+    st.title("👥 تسجيل أعمال العمال ومتابعة الأجور")
     st.markdown("---")
     
-    if role == "Worker" or role == "Admin":
-        with st.form("worker_task"):
-            st.subheader("تسجيل إنجاز مهمة جديدة")
-            ords_act = pd.read_sql("SELECT order_id, customer_name FROM orders WHERE order_status = 'قيد التنفيذ'", conn)
-            o_sel = st.selectbox("الطلبية", options=ords_act['order_id'].tolist(), format_func=lambda x: f"طلبية #{x} - {ords_act[ords_act['order_id'] == x]['customer_name'].values[0]}") if not ords_act.empty else None
-            t_name = st.text_input("اسم المهمة (مثال: طباعة أوفست، فرز)")
-            q_done = st.number_input("الكمية المنجزة", min_value=1.0, value=100.0)
-            p_rate = st.number_input("أجر القطعة (ر.س)", min_value=0.0, value=0.5)
+    with st.form("worker_task"):
+        st.subheader("تسجيل إنجاز مهمة (للعامل أو الأدمن)")
+        ords_act = pd.read_sql("SELECT order_id, customer_name FROM orders WHERE order_status = 'قيد التنفيذ'", conn)
+        o_sel = st.selectbox("رقم الطلبية المرتبطة", options=ords_act['order_id'].tolist(), format_func=lambda x: f"طلبية #{x} - {ords_act.loc[ords_act['order_id'] == x, 'customer_name'].values[0]}") if not ords_act.empty else None
+        
+        stage_sel = st.selectbox("المرحلة الإنتاجية", ["قسم الطباعة", "قسم الفرز والتدبيس", "قسم التغرية والتعريش", "قسم البنر وسلك سكرين"])
+        
+        all_itms = pd.read_sql("SELECT item_code, item_name FROM items", conn)
+        item_sel = st.selectbox("اسم الصنف", options=all_itms['item_code'].tolist(), format_func=lambda x: all_itms.loc[all_itms['item_code'] == x, 'item_name'].values[0]) if not all_itms.empty else None
+        
+        t_desc = st.text_input("وصف نوع العمل (مثال: طباعة أوفست / فرز يدوي)")
+        q_done = st.number_input("الكمية المنجزة", min_value=1.0, value=100.0)
+        
+        # Admin can set price rate, workers see 0 or read-only
+        if role == "Admin":
+            p_rate = st.number_input("أجر القطعة (يحدده الأدمن)", min_value=0.0, value=0.5)
+        else:
+            p_rate = 0.0
+            st.info("💡 يتم تحديد أجر القطعة من قبل إدارة النظام (الأدمن).")
             
-            if st.form_submit_button("تسجيل المهمة وإضافتها لأجوري"):
-                if o_sel:
-                    cursor = conn.cursor()
-                    cursor.execute("INSERT INTO worker_tasks (worker_username, order_id, task_name, quantity_done, piece_rate) VALUES (?, ?, ?, ?, ?)", (st.session_state["username"], o_sel, t_name, q_done, p_rate))
-                    conn.commit()
-                    st.success("تم تسجيل المهمة وحساب الأجر بنجاح!")
-                    st.rerun()
-                    
-    st.markdown("### سجل الأجور والمهام")
+        if st.form_submit_button("حفظ وإرسال المهمة"):
+            if o_sel and item_sel:
+                cursor = conn.cursor()
+                cursor.execute("INSERT INTO worker_tasks (worker_username, order_id, stage_name, item_code, task_description, quantity_done, piece_rate) VALUES (?, ?, ?, ?, ?, ?, ?)", 
+                               (st.session_state["username"], o_sel, stage_sel, item_sel, t_desc, q_done, p_rate))
+                conn.commit()
+                st.success("تم تسجيل المهمة بنجاح!")
+                st.rerun()
+                
+    st.markdown("### سجل المهام والأجور")
     if role == "Admin":
-        df_tasks = pd.read_sql("SELECT task_id AS 'معرف المهمة', worker_username AS 'اسم المستخدم', order_id AS 'رقم الطلبية', task_name AS 'المهمة', quantity_done AS 'الكمية', piece_rate AS 'أجر القطعة', total_wage AS 'إجمالي الأجر', task_date AS 'التاريخ' FROM worker_tasks", conn)
+        df_tasks = pd.read_sql("""
+            SELECT t.task_id AS 'معرف', t.worker_username AS 'العامل', t.order_id AS 'الطلبية', t.stage_name AS 'المرحلة', i.item_name AS 'الصنف', t.task_description AS 'نوع العمل', t.quantity_done AS 'الكمية', t.piece_rate AS 'الأجر', t.total_wage AS 'الإجمالي', t.task_date AS 'التاريخ'
+            FROM worker_tasks t JOIN items i ON t.item_code = i.item_code
+        """, conn)
     else:
-        df_tasks = pd.read_sql(f"SELECT task_id AS 'معرف المهمة', order_id AS 'رقم الطلبية', task_name AS 'المهمة', quantity_done AS 'الكمية', piece_rate AS 'أجر القطعة', total_wage AS 'إجمالي الأجر', task_date AS 'التاريخ' FROM worker_tasks WHERE worker_username = '{st.session_state['username']}'", conn)
+        df_tasks = pd.read_sql(f"""
+            SELECT t.task_id AS 'معرف', t.order_id AS 'الطلبية', t.stage_name AS 'المرحلة', i.item_name AS 'الصنف', t.task_description AS 'نوع العمل', t.quantity_done AS 'الكمية', t.total_wage AS 'إجمالي أجري', t.task_date AS 'التاريخ'
+            FROM worker_tasks t JOIN items i ON t.item_code = i.item_code WHERE t.worker_username = '{st.session_state['username']}'
+        """, conn)
     st.dataframe(df_tasks, use_container_width=True)
     
+    # Admin Edit Task Rate or Delete
     if role == "Admin" and not df_tasks.empty:
-        st.markdown("#### 🛠️ تعديل أو حذف مهمة مسجلة (صلاحية الأدمن)")
-        with st.form("edit_worker_task"):
-            t_id_to_edit = st.number_input("أدخل معرف المهمة (Task ID) للتعديل أو الحذف", min_value=1, step=1)
-            new_q = st.number_input("الكمية المعدلة", value=100.0)
-            new_r = st.number_input("أجر القطعة المعدل", value=0.5)
+        st.markdown("#### 🛠️ تعديل أجر القطعة أو حذف مهمة (صلاحية الأدمن)")
+        with st.form("admin_edit_task"):
+            t_id = st.number_input("معرف المهمة (Task ID) للتعديل", min_value=1, step=1)
+            new_rate = st.number_input("تعديل أجر القطعة الجديد", value=0.5)
             
             col_t1, col_t2 = st.columns(2)
             with col_t1:
-                edt_btn = st.form_submit_button("تعديل المهمة")
+                up_rate_btn = st.form_submit_button("تحديث أجر المهمة")
             with col_t2:
-                del_btn = st.form_submit_button("حذف المهمة")
+                del_t_btn = st.form_submit_button("حذف المهمة نهائياً")
                 
-            if edt_btn:
+            if up_rate_btn:
                 cursor = conn.cursor()
-                cursor.execute("UPDATE worker_tasks SET quantity_done = ?, piece_rate = ? WHERE task_id = ?", (new_q, new_r, t_id_to_edit))
+                cursor.execute("UPDATE worker_tasks SET piece_rate = ? WHERE task_id = ?", (new_rate, t_id))
                 conn.commit()
-                st.success("تم تعديل المهمة بنجاح!")
+                st.success("تم تحديث الأجر بنجاح!")
                 st.rerun()
-            if del_btn:
+            if del_t_btn:
                 cursor = conn.cursor()
-                cursor.execute("DELETE FROM worker_tasks WHERE task_id = ?", (t_id_to_edit,))
+                cursor.execute("DELETE FROM worker_tasks WHERE task_id = ?", (t_id,))
                 conn.commit()
                 st.success("تم حذف المهمة بنجاح!")
                 st.rerun()
+
 # ================= 8. PASSWORD CHANGE =================
 elif menu == "🔐 إعدادات الحساب وكلمة المرور":
     st.title("🔐 تغيير كلمة المرور الخاصة بحسابك")
@@ -566,34 +572,89 @@ elif menu == "🔐 إعدادات الحساب وكلمة المرور":
                 st.error("كلمة المرور الحالية غير صحيحة.")
             conn_u.close()
 
-# ================= 9. ADMIN USERS =================
-elif menu == "🛠️ إدارة المستخدمين والصلاحيات الشاملة":
+# ================= 9. ADMIN USERS & PERMISSIONS & EXCEL EXPORT =================
+elif menu == "🛠️ إدارة المستخدمين والصلاحيات":
     if role != "Admin":
         st.error("عذراً، هذه الصفحة مخصصة لمدير النظام (Admin) فقط.")
     else:
-        st.title("🛠️ إدارة المستخدمين والصلاحيات الشاملة (تحكم كامل)")
+        st.title("🛠️ إدارة المستخدمين، الصلاحيات، وتصدير قواعد البيانات")
         st.markdown("---")
         
-        with st.form("add_user_full"):
-            st.subheader("إضافة مستخدم جديد وتحديد دوره")
-            u_name = st.text_input("اسم المستخدم")
-            u_pass = st.text_input("كلمة المرور")
-            u_full = st.text_input("الاسم الكامل للعامل")
-            u_dept = st.text_input("القسم")
-            u_role = st.selectbox("الدور والصلاحية", ["Admin", "Inventory", "Worker"])
+        tab_u1, tab_u2, tab_u3 = st.tabs(["إضافة مستخدم جديد", "تعديل صلاحيات المستخدمين", "تصدير البيانات إلى إكسل"])
+        
+        with tab_u1:
+            with st.form("add_user_full"):
+                u_name = st.text_input("اسم المستخدم")
+                u_pass = st.text_input("كلمة المرور")
+                u_full = st.text_input("الاسم الكامل للعامل")
+                u_dept = st.text_input("القسم")
+                u_role = st.selectbox("الدور", ["Admin", "Worker"])
+                
+                if st.form_submit_button("إضافة المستخدم"):
+                    try:
+                        cursor = conn.cursor()
+                        cursor.execute("INSERT INTO users (username, password, full_name, department, role, allowed_screens) VALUES (?, ?, ?, ?, ?, 'Dashboard,Inventory,Orders,Workers')", (u_name, u_pass, u_full, u_dept, u_role))
+                        conn.commit()
+                        st.success("تم إضافة المستخدم بنجاح!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"خطأ: اسم المستخدم موجود مسبقاً ({e})")
+                        
+        with tab_u2:
+            st.subheader("تخصيص صلاحيات الشاشات لكل مستخدم")
+            users_list = pd.read_sql("SELECT username, full_name, allowed_screens FROM users", conn)
             
-            if st.form_submit_button("إضافة المستخدم للنظام"):
-                try:
-                    cursor = conn.cursor()
-                    cursor.execute("INSERT INTO users (username, password, full_name, department, role, allowed_screens) VALUES (?, ?, ?, ?, ?, 'All')", (u_name, u_pass, u_full, u_dept, u_role))
-                    conn.commit()
-                    st.success("تم إضافة المستخدم بنجاح!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"خطأ: اسم المستخدم موجود مسبقاً ({e})")
+            if not users_list.empty:
+                sel_usr = st.selectbox("اختر المستخدم للتعديل", options=users_list['username'].tolist(), format_func=lambda x: users_list.loc[users_list['username'] == x, 'full_name'].values[0])
+                current_allowed = users_list.loc[users_list['username'] == sel_usr, 'allowed_screens'].values[0]
+                
+                with st.form("perm_form"):
+                    st.markdown(f"**الصلاحيات الحالية لـ ({sel_usr}):** `{current_allowed}`")
                     
-        st.markdown("### قائمة المستخدمين والصلاحيات الحالية")
-        df_usr = pd.read_sql("SELECT username AS 'اسم المستخدم', full_name AS 'الاسم الكامل', department AS 'القسم', role AS 'الصلاحية' FROM users", conn)
-        st.dataframe(df_usr, use_container_width=True)
+                    # Checkboxes for screens
+                    p_dash = st.checkbox("لوحة المؤشرات (Dashboard)", value="Dashboard" in current_allowed or current_allowed=="All")
+                    p_inv = st.checkbox("إدارة المخزون (Inventory)", value="Inventory" in current_allowed or current_allowed=="All")
+                    p_pur = st.checkbox("فواتير الشراء (Purchases)", value="Purchases" in current_allowed or current_allowed=="All")
+                    p_sal = st.checkbox("فواتير البيع (Sales)", value="Sales" in current_allowed or current_allowed=="All")
+                    p_ord = st.checkbox("الطلبيات والإنتاج (Orders)", value="Orders" in current_allowed or current_allowed=="All")
+                    p_wf = st.checkbox("متابعة سير العمل (Workflow)", value="Workflow" in current_allowed or current_allowed=="All")
+                    p_wrk = st.checkbox("تسجيل وأجور العمال (Workers)", value="Workers" in current_allowed or current_allowed=="All")
+                    
+                    if st.form_submit_button("حفظ وتحديث الصلاحيات"):
+                        new_perms = []
+                        if p_dash: new_perms.append("Dashboard")
+                        if p_inv: new_perms.append("Inventory")
+                        if p_pur: new_perms.append("Purchases")
+                        if p_sal: new_perms.append("Sales")
+                        if p_ord: new_perms.append("Orders")
+                        if p_wf: new_perms.append("Workflow")
+                        if p_wrk: new_perms.append("Workers")
+                        
+                        perm_str = ",".join(new_perms)
+                        cursor = conn.cursor()
+                        cursor.execute("UPDATE users SET allowed_screens = ? WHERE username = ?", (perm_str, sel_usr))
+                        conn.commit()
+                        st.success("تم تحديث صلاحيات المستخدم بنجاح!")
+                        st.rerun()
+
+        with tab_u3:
+            st.subheader("📥 تنزيل وتصدير كافة بيانات النظام إلى ملف إكسل (Excel)")
+            if st.button("تصدير وتحميل قاعدة البيانات الآن"):
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    pd.read_sql("SELECT * FROM users", conn).to_excel(writer, sheet_name='المستخدمين', index=False)
+                    pd.read_sql("SELECT * FROM items", conn).to_excel(writer, sheet_name='الأصناف', index=False)
+                    pd.read_sql("SELECT * FROM orders", conn).to_excel(writer, sheet_name='الطلبيات', index=False)
+                    pd.read_sql("SELECT * FROM purchase_invoices", conn).to_excel(writer, sheet_name='فواتير الشراء', index=False)
+                    pd.read_sql("SELECT * FROM sales_invoices", conn).to_excel(writer, sheet_name='فواتير البيع', index=False)
+                    pd.read_sql("SELECT * FROM worker_tasks", conn).to_excel(writer, sheet_name='أعمال وأجور العمال', index=False)
+                output.seek(0)
+                
+                st.download_button(
+                    label="📥 انقر هنا لتحميل ملف الإكسل الشامل (.xlsx)",
+                    data=output,
+                    file_name=f"Printing_Press_Backup_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
 conn.close()
