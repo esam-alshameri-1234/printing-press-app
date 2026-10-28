@@ -4,12 +4,12 @@ import pandas as pd
 from datetime import datetime
 
 st.set_page_config(
-    page_title="نظام المطبعة الشامل والذكي",
+    page_title="نظام المطبعة الشامل والذكي (ERP)",
     page_icon="🖨️",
     layout="wide"
 )
 
-DB_NAME = "printing_press_pro.db"
+DB_NAME = "printing_press_enterprise.db"
 
 def get_connection():
     conn = sqlite3.connect(DB_NAME)
@@ -60,31 +60,53 @@ def init_db():
         )
     ''')
     
-    # 4. Purchases Invoices
+    # 4. Purchases Header & Details (فواتير الشراء متعددة الأصناف)
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS purchases (
-            purchase_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        CREATE TABLE IF NOT EXISTS purchase_invoices (
+            inv_id INTEGER PRIMARY KEY AUTOINCREMENT,
             invoice_no TEXT UNIQUE NOT NULL,
             supplier_name TEXT NOT NULL,
-            item_code TEXT,
+            purchase_date TEXT DEFAULT CURRENT_TIMESTAMP,
+            total_invoice_amount REAL DEFAULT 0
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS purchase_items (
+            p_item_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            invoice_no TEXT NOT NULL,
+            item_code TEXT NOT NULL,
             quantity REAL NOT NULL,
             unit_price REAL NOT NULL,
-            total_amount REAL,
-            purchase_date TEXT DEFAULT CURRENT_TIMESTAMP,
+            total_price REAL NOT NULL,
+            FOREIGN KEY(invoice_no) REFERENCES purchase_invoices(invoice_no),
             FOREIGN KEY(item_code) REFERENCES items(item_code)
         )
     ''')
     
-    # 5. Sales Invoices
+    # 5. Sales Header & Details (فواتير البيع متعددة الأصناف)
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS sales (
-            sale_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        CREATE TABLE IF NOT EXISTS sales_invoices (
+            s_inv_id INTEGER PRIMARY KEY AUTOINCREMENT,
             invoice_no TEXT UNIQUE NOT NULL,
             order_id INTEGER,
             customer_name TEXT NOT NULL,
-            total_amount REAL NOT NULL,
             sale_date TEXT DEFAULT CURRENT_TIMESTAMP,
+            total_invoice_amount REAL DEFAULT 0,
             FOREIGN KEY(order_id) REFERENCES orders(order_id)
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS sales_items (
+            s_item_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            invoice_no TEXT NOT NULL,
+            item_code TEXT NOT NULL,
+            quantity REAL NOT NULL,
+            unit_price REAL NOT NULL,
+            total_price REAL NOT NULL,
+            FOREIGN KEY(invoice_no) REFERENCES sales_invoices(invoice_no),
+            FOREIGN KEY(item_code) REFERENCES items(item_code)
         )
     ''')
     
@@ -134,7 +156,7 @@ if "logged_in" not in st.session_state:
 
 # --- LOGIN SCREEN ---
 if not st.session_state["logged_in"]:
-    st.markdown("<h1 style='text-align: center; color: #1F4E78;'>🖨️ نظام المطبعة الشامل والذكي</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; color: #1F4E78;'>🖨️ نظام المطبعة الشامل والذكي (ERP)</h1>", unsafe_allow_html=True)
     st.markdown("<h4 style='text-align: center; color: gray;'>تسجيل الدخول الموحد</h4>", unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -177,9 +199,9 @@ st.sidebar.markdown("---")
 menu_options = [
     "📊 لوحة المؤشرات والتحكم",
     "📦 إدارة المخزون والأصناف",
-    "📥 فواتير وسندات المخزن",
+    "📥 فواتير الشراء متعددة الأصناف",
+    "💰 فواتير البيع متعددة الأصناف",
     "📋 إدارة الطلبيات والإنتاج",
-    "💰 فواتير البيع والمخرجات",
     "⚙️ متابعة سير العمل ومراحل الإنتاج",
     "👥 تقارير وأجور العاملين",
     "🔐 إعدادات الحساب وكلمة المرور"
@@ -203,7 +225,7 @@ if menu == "📊 لوحة المؤشرات والتحكم":
     
     total_orders = pd.read_sql("SELECT COUNT(*) FROM orders", conn).iloc[0, 0]
     total_items = pd.read_sql("SELECT COUNT(*) FROM items", conn).iloc[0, 0]
-    total_sales = pd.read_sql("SELECT SUM(total_amount) FROM sales", conn).iloc[0, 0] or 0.0
+    total_sales = pd.read_sql("SELECT SUM(total_invoice_amount) FROM sales_invoices", conn).iloc[0, 0] or 0.0
     total_wages = pd.read_sql("SELECT SUM(total_wage) FROM worker_tasks", conn).iloc[0, 0] or 0.0
     
     col1, col2, col3, col4 = st.columns(4)
@@ -228,7 +250,7 @@ elif menu == "📦 إدارة المخزون والأصناف":
         st.dataframe(df_items, use_container_width=True)
         
     with tab2:
-        if role == "Admin" or "Inventory" in allowed or allowed == "All":
+        if role == "Admin" or allowed == "All":
             with st.form("add_item"):
                 c1, c2 = st.columns(2)
                 with c1:
@@ -249,8 +271,6 @@ elif menu == "📦 إدارة المخزون والأصناف":
                         st.rerun()
                     except Exception as e:
                         st.error(f"خطأ: الكود موجود مسبقاً ({e})")
-        else:
-            st.warning("ليس لديك صلاحية لإضافة أصناف.")
 
     with tab3:
         if role == "Admin" or allowed == "All":
@@ -282,73 +302,144 @@ elif menu == "📦 إدارة المخزون والأصناف":
                         conn.commit()
                         st.success("تم حذف الصنف بنجاح!")
                         st.rerun()
-        else:
-            st.warning("هذه الصلاحية خاصة بمدير النظام.")
 
-# ================= 3. PURCHASES & VOUCHERS =================
-elif menu == "📥 فواتير وسندات المخزن":
-    st.title("📥 فواتير الشراء وسندات الصرف والقبض المخزني")
+# ================= 3. MULTI-ITEM PURCHASE INVOICES =================
+elif menu == "📥 فواتير الشراء متعددة الأصناف":
+    st.title("📥 فواتير الشراء متعددة الأصناف (توريد مواد خام)")
     st.markdown("---")
     
-    t1, t2, t3 = st.tabs(["فاتورة شراء (توريد)", "سند صرف / قبض مخزني", "تقارير حركة الصنف (وارد ومنصرف)"])
-    
-    with t1:
-        with st.form("purchase_form"):
-            st.subheader("إدخال فاتورة شراء مواد خام جديدة وزيادة رصيد المخزن")
-            inv_no = st.text_input("رقم فاتورة المورد")
-            supplier = st.text_input("اسم المورد")
-            raw_items = pd.read_sql("SELECT item_code, item_name FROM items WHERE category = 'مادة خام'", conn)
+    with st.form("multi_purchase_form"):
+        st.subheader("رأس الفاتورة")
+        p_inv_no = st.text_input("رقم فاتورة الشراء")
+        p_supplier = st.text_input("اسم المورد")
+        
+        st.subheader("بنود الأصناف في الفاتورة")
+        raw_items = pd.read_sql("SELECT item_code, item_name FROM items WHERE category = 'مادة خام'", conn)
+        
+        if raw_items.empty:
+            st.warning("يرجى إضافة مواد خام للمستودع أولاً.")
+        else:
+            # We will allow adding up to 3 items in one invoice for simplicity and robustness
+            st.markdown("##### الصنف الأول")
+            i1 = st.selectbox("اختر المادة الخام 1", options=raw_items['item_code'].tolist(), format_func=lambda x: raw_items[raw_items['item_code'] == x]['item_name'].values[0], key="i1")
+            q1 = st.number_input("الكمية 1", min_value=0.0, value=0.0, key="q1")
+            pr1 = st.number_input("سعر الوحدة 1", min_value=0.0, value=0.0, key="pr1")
             
-            r_code = st.selectbox("المادة الخام", options=raw_items['item_code'].tolist(), format_func=lambda x: raw_items[raw_items['item_code'] == x]['item_name'].values[0]) if not raw_items.empty else None
-            p_qty = st.number_input("الكمية المشتراة", min_value=1.0, value=50.0)
-            u_price = st.number_input("سعر الوحدة", min_value=0.0, value=10.0)
+            st.markdown("##### الصنف الثاني (اختياري)")
+            i2 = st.selectbox("اختر المادة الخام 2", options=["لا يوجد"] + raw_items['item_code'].tolist(), format_func=lambda x: "لا يوجد" if x=="لا يوجد" else raw_items[raw_items['item_code'] == x]['item_name'].values[0], key="i2")
+            q2 = st.number_input("الكمية 2", min_value=0.0, value=0.0, key="q2")
+            pr2 = st.number_input("سعر الوحدة 2", min_value=0.0, value=0.0, key="pr2")
+            
+            st.markdown("##### الصنف الثالث (اختياري)")
+            i3 = st.selectbox("اختر المادة الخام 3", options=["لا يوجد"] + raw_items['item_code'].tolist(), format_func=lambda x: "لا يوجد" if x=="لا يوجد" else raw_items[raw_items['item_code'] == x]['item_name'].values[0], key="i3")
+            q3 = st.number_input("الكمية 3", min_value=0.0, value=0.0, key="q3")
+            pr3 = st.number_input("سعر الوحدة 3", min_value=0.0, value=0.0, key="pr3")
             
             if st.form_submit_button("حفظ فاتورة الشراء وتحديث المخزن"):
-                if r_code:
-                    total_val = p_qty * u_price
-                    cursor = conn.cursor()
-                    cursor.execute("INSERT INTO purchases (invoice_no, supplier_name, item_code, quantity, unit_price, total_amount) VALUES (?, ?, ?, ?, ?, ?)", (inv_no, supplier, r_code, p_qty, u_price, total_val))
-                    cursor.execute("UPDATE items SET current_stock = current_stock + ? WHERE item_code = ?", (p_qty, r_code))
-                    conn.commit()
-                    st.success("تم حفظ الفاتورة وتحديث رصيد المخزن بنجاح!")
-                    st.rerun()
-                    
-    with t2:
-        with st.form("voucher_form"):
-            st.subheader("سندات الصرف والقبض المخزني اليدوية")
-            v_type = st.selectbox("نوع السند", ["سند صرف مخزني", "سند قبض مخزني"])
-            all_items = pd.read_sql("SELECT item_code, item_name FROM items", conn)
-            v_item = st.selectbox("الصنف", options=all_items['item_code'].tolist(), format_func=lambda x: all_items[all_items['item_code'] == x]['item_name'].values[0]) if not all_items.empty else None
-            v_qty = st.number_input("الكمية", min_value=1.0, value=10.0)
-            v_notes = st.text_area("ملاحظات السند والسبب")
-            
-            if st.form_submit_button("تنفيذ السند وتحديث المخزن"):
-                if v_item:
-                    cursor = conn.cursor()
-                    cursor.execute("INSERT INTO inventory_vouchers (voucher_type, item_code, quantity, notes) VALUES (?, ?, ?, ?)", (v_type, v_item, v_qty, v_notes))
-                    if v_type == "سند صرف مخزني":
-                        cursor.execute("UPDATE items SET current_stock = current_stock - ? WHERE item_code = ?", (v_qty, v_item))
-                    else:
-                        cursor.execute("UPDATE items SET current_stock = current_stock + ? WHERE item_code = ?", (v_qty, v_item))
-                    conn.commit()
-                    st.success("تم تنفيذ السند وتحديث المخزن بنجاح!")
-                    st.rerun()
-                    
-    with t3:
-        st.subheader("تقرير حركة الوارد والمنصرف التفصيلي لكل صنف")
-        all_itms = pd.read_sql("SELECT item_code, item_name FROM items", conn)
-        if not all_itms.empty:
-            sel_rep_item = st.selectbox("اختر الصنف لعرض حركته", options=all_itms['item_code'].tolist(), format_func=lambda x: all_itms[all_itms['item_code'] == x]['item_name'].values[0])
-            
-            st.markdown("#### 📥 المشتريات (الوارد)")
-            df_pur = pd.read_sql(f"SELECT invoice_no AS 'رقم الفاتورة', supplier_name AS 'المورد', quantity AS 'الكمية الواردة', unit_price AS 'السعر', purchase_date AS 'التاريخ' FROM purchases WHERE item_code = '{sel_rep_item}'", conn)
-            st.dataframe(df_pur, use_container_width=True)
-            
-            st.markdown("#### 📤 السندات والحركات المخزنية")
-            df_vouch = pd.read_sql(f"SELECT voucher_type AS 'نوع السند', quantity AS 'الكمية', notes AS 'الملاحظات', voucher_date AS 'التاريخ' FROM inventory_vouchers WHERE item_code = '{sel_rep_item}'", conn)
-            st.dataframe(df_vouch, use_container_width=True)
+                if p_inv_no and p_supplier:
+                    try:
+                        cursor = conn.cursor()
+                        total_inv = 0
+                        items_to_save = []
+                        
+                        if q1 > 0:
+                            t1 = q1 * pr1
+                            total_inv += t1
+                            items_to_save.append((i1, q1, pr1, t1))
+                            
+                        if i2 != "لا يوجد" and q2 > 0:
+                            t2 = q2 * pr2
+                            total_inv += t2
+                            items_to_save.append((i2, q2, pr2, t2))
+                            
+                        if i3 != "لا يوجد" and q3 > 0:
+                            t3 = q3 * pr3
+                            total_inv += t3
+                            items_to_save.append((i3, q3, pr3, t3))
+                            
+                        if items_to_save:
+                            cursor.execute("INSERT INTO purchase_invoices (invoice_no, supplier_name, total_invoice_amount) VALUES (?, ?, ?)", (p_inv_no, p_supplier, total_inv))
+                            for itm in items_to_save:
+                                cursor.execute("INSERT INTO purchase_items (invoice_no, item_code, quantity, unit_price, total_price) VALUES (?, ?, ?, ?, ?)", (p_inv_no, itm[0], itm[1], itm[2], itm[3]))
+                                cursor.execute("UPDATE items SET current_stock = current_stock + ? WHERE item_code = ?", (itm[1], itm[0]))
+                            conn.commit()
+                            st.success("تم حفظ فاتورة الشراء وتحديث أرصدة المخازن بنجاح!")
+                            st.rerun()
+                        else:
+                            st.error("يرجى إدخال صنف واحد على الأقل بكمية صحيحة.")
+                    except Exception as e:
+                        st.error(f"خطأ: رقم الفاتورة موجود مسبقاً أو بيانات غير صحيحة ({e})")
+                else:
+                    st.warning("يرجى إدخال رقم الفاتورة اسم المورد.")
 
-# ================= 4. ORDERS =================
+    st.markdown("### سجل فواتير الشراء السابقة")
+    df_p_inv = pd.read_sql("SELECT invoice_no AS 'رقم الفاتورة', supplier_name AS 'المورد', total_invoice_amount AS 'إجمالي الفاتورة', purchase_date AS 'التاريخ' FROM purchase_invoices", conn)
+    st.dataframe(df_p_inv, use_container_width=True)
+
+# ================= 4. MULTI-ITEM SALES INVOICES =================
+elif menu == "💰 فواتير البيع متعددة الأصناف":
+    st.title("💰 فواتير البيع متعددة الأصناف والمخرجات")
+    st.markdown("---")
+    
+    ready_ords = pd.read_sql("SELECT order_id, customer_name FROM orders WHERE invoice_no IS NULL", conn)
+    
+    with st.form("multi_sale_form"):
+        st.subheader("إصدار فاتورة بيع مرتبطة بالطلبية ومشتملة على عدة اصناف")
+        s_ord = st.selectbox("اختر الطلبية المكتملة", options=ready_ords['order_id'].tolist(), format_func=lambda x: f"طلبية #{x} - {ready_ords[ready_ords['order_id'] == s_ord]['customer_name'].values[0]}") if not ready_ords.empty else None
+        s_inv_no = st.text_input("رقم فاتورة البيع النهائية")
+        
+        all_itms = pd.read_sql("SELECT item_code, item_name FROM items", conn)
+        
+        st.subheader("بنود الأصناف المباعة")
+        if all_itms.empty:
+            st.warning("لا توجد أصناف مسجلة.")
+        else:
+            s_i1 = st.selectbox("الصنف المباع 1", options=all_itms['item_code'].tolist(), format_func=lambda x: all_itms[all_itms['item_code'] == x]['item_name'].values[0], key="si1")
+            s_q1 = st.number_input("الكمية المباعة 1", min_value=0.0, value=0.0, key="sq1")
+            s_pr1 = st.number_input("سعر البيع للوحدة 1", min_value=0.0, value=0.0, key="spr1")
+            
+            s_i2 = st.selectbox("الصنف المباع 2 (اختياري)", options=["لا يوجد"] + all_itms['item_code'].tolist(), format_func=lambda x: "لا يوجد" if x=="لا يوجد" else all_itms[all_itms['item_code'] == x]['item_name'].values[0], key="si2")
+            s_q2 = st.number_input("الكمية المباعة 2", min_value=0.0, value=0.0, key="sq2")
+            s_pr2 = st.number_input("سعر البيع للوحدة 2", min_value=0.0, value=0.0, key="spr2")
+            
+            if st.form_submit_button("إصدار فاتورة البيع وإغلاق الطلبية"):
+                if s_ord and s_inv_no:
+                    try:
+                        cust_name = ready_ords[ready_ords['order_id'] == s_ord]['customer_name'].values[0]
+                        cursor = conn.cursor()
+                        tot_sale = 0
+                        s_items_to_save = []
+                        
+                        if s_q1 > 0:
+                            st1 = s_q1 * s_pr1
+                            tot_sale += st1
+                            s_items_to_save.append((s_i1, s_q1, s_pr1, st1))
+                            
+                        if s_i2 != "لا يوجد" and s_q2 > 0:
+                            st2 = s_q2 * s_pr2
+                            tot_sale += st2
+                            s_items_to_save.append((s_i2, s_q2, s_pr2, st2))
+                            
+            if s_items_to_save:
+                            cursor.execute("INSERT INTO sales_invoices (invoice_no, order_id, customer_name, total_invoice_amount) VALUES (?, ?, ?, ?)", (s_inv_no, s_ord, cust_name, tot_sale))
+                            for sitm in s_items_to_save:
+                                cursor.execute("INSERT INTO sales_items (invoice_no, item_code, quantity, unit_price, total_price) VALUES (?, ?, ?, ?, ?)", (s_inv_no, sitm[0], sitm[1], sitm[2], sitm[3]))
+                            cursor.execute("UPDATE orders SET invoice_no = ?, order_status = 'مكتملة ومسلمة' WHERE order_id = ?", (s_inv_no, s_ord))
+                            conn.commit()
+                            st.success("تم إصدار فاتورة البيع وإغلاق الطلبية بنجاح!")
+                            st.rerun()
+                        else:
+                            st.error("يرجى اختيار صنف مباع واحد على الأقل بكمية صحيحة.")
+                    except Exception as e:
+                        st.error(f"خطأ: رقم الفاتورة موجود مسبقاً ({e})")
+                else:
+                    st.warning("يرجى اختيار الطلبية وإدخال رقم الفاتورة.")
+
+    st.markdown("### سجل فواتير المبيعات الصادرة")
+    df_s_inv = pd.read_sql("SELECT invoice_no AS 'رقم الفاتورة', order_id AS 'رقم الطلبية', customer_name AS 'العميل', total_invoice_amount AS 'إجمالي الفاتورة', sale_date AS 'التاريخ' FROM sales_invoices", conn)
+    st.dataframe(df_s_inv, use_container_width=True)
+
+# ================= 5. ORDERS =================
 elif menu == "📋 إدارة الطلبيات والإنتاج":
     st.title("📋 إدارة الطلبيات وسير العمل")
     st.markdown("---")
@@ -370,33 +461,6 @@ elif menu == "📋 إدارة الطلبيات والإنتاج":
     st.markdown("### سجل الطلبيات النشطة")
     df_ords = pd.read_sql("SELECT order_id AS 'رقم الطلبية', customer_name AS 'العميل', ordered_quantity AS 'الكمية', current_stage AS 'المرحلة الحالية', order_status AS 'الحالة' FROM orders", conn)
     st.dataframe(df_ords, use_container_width=True)
-
-# ================= 5. SALES =================
-elif menu == "💰 فواتير البيع والمخرجات":
-    st.title("💰 مخرجات الإنتاج وفواتير البيع النهائية")
-    st.markdown("---")
-    
-    ready_ords = pd.read_sql("SELECT order_id, customer_name FROM orders WHERE invoice_no IS NULL", conn)
-    
-    with st.form("sale_invoice_form"):
-        st.subheader("إصدار فاتورة بيع نهائية وإغلاق الطلبية")
-        s_ord = st.selectbox("الطلبية المكتملة", options=ready_ords['order_id'].tolist(), format_func=lambda x: f"طلبية #{x} - {ready_ords[ready_ords['order_id'] == s_ord]['customer_name'].values[0]}") if not ready_ords.empty else None
-        inv_n = st.text_input("رقم فاتورة البيع (مثال: INV-9001)")
-        tot_amt = st.number_input("إجمالي مبلغ الفاتورة (ر.س)", min_value=0.0, value=1000.0)
-        
-        if st.form_submit_button("إصدار الفاتورة وإغلاق الطلبية"):
-            if s_ord:
-                cust = ready_ords[ready_ords['order_id'] == s_ord]['customer_name'].values[0]
-                cursor = conn.cursor()
-                cursor.execute("INSERT INTO sales (invoice_no, order_id, customer_name, total_amount) VALUES (?, ?, ?, ?)", (inv_n, s_ord, cust, tot_amt))
-                cursor.execute("UPDATE orders SET invoice_no = ?, order_status = 'مكتملة ومسلمة' WHERE order_id = ?", (inv_n, s_ord))
-                conn.commit()
-                st.success("تم إصدار الفاتورة وإغلاق الطلبية بنجاح!")
-                st.rerun()
-                
-    st.markdown("### سجل فواتير المبيعات الصادرة")
-    df_sales = pd.read_sql("SELECT invoice_no AS 'رقم الفاتورة', order_id AS 'رقم الطلبية', customer_name AS 'العميل', total_amount AS 'المبلغ (ر.س)', sale_date AS 'التاريخ' FROM sales", conn)
-    st.dataframe(df_sales, use_container_width=True)
 
 # ================= 6. WORKFLOW =================
 elif menu == "⚙️ متابعة سير العمل ومراحل الإنتاج":
